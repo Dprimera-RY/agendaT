@@ -1,0 +1,153 @@
+// Prisma schema - Agenda de Citas Multi-Negocio
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// USUARIOS Y AUTENTICACIÓN
+// ============================================================
+
+model Admin {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  password  String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model BusinessOwner {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  password  String
+  name      String
+  email     String?
+  phone     String? // WhatsApp del dueño
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  businesses Business[]
+}
+
+// ============================================================
+// CATÁLOGO
+// ============================================================
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String   @unique // Peluquería, Barbería, Spa, Dentista, etc.
+  slug        String   @unique
+  icon        String?  // nombre de icono Lucide
+  description String?
+  createdAt   DateTime @default(now())
+
+  businesses Business[]
+}
+
+model Business {
+  id        String   @id @default(cuid())
+  slug      String   @unique // nombre-negocio en URL
+  name      String
+  description String?
+  logo      String?  // URL o base64
+  photo1    String?  // foto de trabajo 1
+  photo2    String?  // foto de trabajo 2
+  photo3    String?  // foto de trabajo 3
+  address   String?
+  phone     String?
+  email     String?
+  ownerId   String
+  categoryId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner        BusinessOwner @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  category     Category      @relation(fields: [categoryId], references: [id])
+  license      License?
+  services     Service[]
+  appointments Appointment[]
+  availabilities Availability[]
+}
+
+model License {
+  id          String   @id @default(cuid())
+  businessId  String   @unique
+  startDate   DateTime
+  endDate     DateTime
+  durationDays Int     // duración total de la licencia en días
+  active      Boolean  @default(true)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================
+// SERVICIOS Y CITAS
+// ============================================================
+
+model Service {
+  id          String   @id @default(cuid())
+  businessId  String
+  name        String
+  description String?
+  price       Float
+  durationMin Int      @default(30) // duración en minutos
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+}
+
+model Appointment {
+  id          String   @id @default(cuid())
+  businessId  String
+  serviceId   String
+  customerName String
+  customerPhone String  // WhatsApp del cliente
+  customerEmail String?
+  date        DateTime // fecha y hora exacta
+  status      String   @default("pendiente") // pendiente | confirmada | cancelada | completada
+  notes       String?
+  depositPaid Boolean  @default(false)
+  depositAmount Float?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  service  Service  @relation(fields: [serviceId], references: [id])
+}
+
+// ============================================================
+// DISPONIBILIDAD
+// ============================================================
+
+model Availability {
+  id          String   @id @default(cuid())
+  businessId  String
+  dayOfWeek   Int      // 0=Dom, 1=Lun, ..., 6=Sab
+  startTime   String   // "09:00"
+  endTime     String   // "17:00"
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// Bloqueos de horario específicos (vacaciones, días libres puntuales)
+model TimeBlock {
+  id          String   @id @default(cuid())
+  businessId  String
+  startDate   DateTime
+  endDate     DateTime
+  reason      String?
+  createdAt   DateTime @default(now())
+}
