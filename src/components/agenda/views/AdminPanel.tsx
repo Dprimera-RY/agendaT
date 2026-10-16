@@ -74,7 +74,7 @@ interface Category {
 
 export function AdminPanel() {
   const { navigate } = useRouterStore()
-  const { session } = useAuth()
+  const { session, loading: authLoading } = useAuth()
   const [tab, setTab] = useState('overview')
   const [owners, setOwners] = useState<Owner[]>([])
   const [businesses, setBusinesses] = useState<AdminBusiness[]>([])
@@ -105,11 +105,13 @@ export function AdminPanel() {
   const [licForm, setLicForm] = useState({ businessId: '', addDays: '30' })
 
   useEffect(() => {
+    // Esperar a que termine la carga de la sesión antes de decidir
+    if (authLoading) return
     if (session.role !== 'admin') {
       navigate('/login')
       return
     }
-  }, [session.role, navigate])
+  }, [session.role, authLoading, navigate])
 
   const loadAll = useCallback(async () => {
     setLoading(true)
@@ -240,6 +242,18 @@ export function AdminPanel() {
     } catch {
       toast.error('Error')
     }
+  }
+
+  // Si la sesión sigue cargando, mostrar skeleton
+  if (authLoading || session.role === null) {
+    return (
+      <div className="container mx-auto px-4 py-8 space-y-4">
+        <div className="h-8 w-32 bg-muted animate-pulse rounded" />
+        <div className="grid md:grid-cols-3 gap-4">
+          {[1, 2, 3].map((i) => <div key={i} className="h-32 bg-muted animate-pulse rounded-xl" />)}
+        </div>
+      </div>
+    )
   }
 
   if (session.role !== 'admin') {

@@ -90,7 +90,7 @@ interface Availability {
 
 export function BusinessPanel({ slug }: { slug: string }) {
   const { navigate } = useRouterStore()
-  const { session } = useAuth()
+  const { session, loading: authLoading } = useAuth()
   const [business, setBusiness] = useState<Business | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -137,12 +137,14 @@ export function BusinessPanel({ slug }: { slug: string }) {
 
   // Verificar acceso
   useEffect(() => {
+    // Esperar a que termine la carga de la sesión antes de decidir
+    if (authLoading) return
     if (!session.role) {
       navigate('/login')
       return
     }
     loadBusiness()
-  }, [session.role, navigate, loadBusiness])
+  }, [session.role, authLoading, navigate, loadBusiness])
 
   useEffect(() => {
     if (!business) return

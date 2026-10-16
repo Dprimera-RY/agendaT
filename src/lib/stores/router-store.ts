@@ -60,12 +60,21 @@ export function initRouter() {
 
 // Helpers de matching de rutas
 export function matchRoute(path: string): {
-  name: 'catalog' | 'business' | 'business-panel' | 'admin' | 'login'
+  name:
+    | 'catalog'
+    | 'business'
+    | 'business-panel'
+    | 'admin'
+    | 'login'
+    | 'register'
+    | 'create-business'
   slug?: string
 } {
   if (path === '/' || path === '') return { name: 'catalog' }
   if (path === '/admin') return { name: 'admin' }
   if (path === '/login') return { name: 'login' }
+  if (path === '/register') return { name: 'register' }
+  if (path === '/crear-negocio') return { name: 'create-business' }
   const bizMatch = path.match(/^\/negocio\/([^/]+)$/)
   if (bizMatch) return { name: 'business', slug: bizMatch[1] }
   const panelMatch = path.match(/^\/negocio\/([^/]+)\/panel$/)

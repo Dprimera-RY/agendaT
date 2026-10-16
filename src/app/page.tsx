@@ -8,6 +8,8 @@ import { BusinessView } from '@/components/agenda/views/BusinessView'
 import { BusinessPanel } from '@/components/agenda/views/BusinessPanel'
 import { AdminPanel } from '@/components/agenda/views/AdminPanel'
 import { LoginView } from '@/components/agenda/views/LoginView'
+import { RegisterView } from '@/components/agenda/views/RegisterView'
+import { CreateBusinessView } from '@/components/agenda/views/CreateBusinessView'
 import { AppShell } from '@/components/agenda/AppShell'
 
 export default function HomePage() {
@@ -32,6 +34,10 @@ export default function HomePage() {
     content = <AdminPanel />
   } else if (matched.name === 'login') {
     content = <LoginView />
+  } else if (matched.name === 'register') {
+    content = <RegisterView />
+  } else if (matched.name === 'create-business') {
+    content = <CreateBusinessView />
   } else {
     content = <CatalogView />
   }

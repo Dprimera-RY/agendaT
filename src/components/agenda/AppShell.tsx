@@ -53,28 +53,45 @@ export function AppShell({ children }: { children: ReactNode }) {
               Catálogo
             </Button>
 
-            {session.role === 'owner' && session.businesses && session.businesses.length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant={isOnPanel ? 'default' : 'ghost'} size="sm">
-                    Mi Panel
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuLabel>Mis negocios</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {session.businesses.map((b) => (
+            {session.role === 'owner' && (
+              session.businesses && session.businesses.length > 0 ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant={isOnPanel ? 'default' : 'ghost'} size="sm">
+                      Mi Panel
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuLabel>Mis negocios</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {session.businesses.map((b) => (
+                      <DropdownMenuItem
+                        key={b.id}
+                        onClick={() => navigate(`/negocio/${b.slug}/panel`)}
+                        className="cursor-pointer flex flex-col items-start"
+                      >
+                        <span className="font-medium">{b.name}</span>
+                        <span className="text-xs text-muted-foreground">/{b.slug}</span>
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem
-                      key={b.id}
-                      onClick={() => navigate(`/negocio/${b.slug}/panel`)}
-                      className="cursor-pointer flex flex-col items-start"
+                      onClick={() => navigate('/crear-negocio')}
+                      className="cursor-pointer text-primary"
                     >
-                      <span className="font-medium">{b.name}</span>
-                      <span className="text-xs text-muted-foreground">/{b.slug}</span>
+                      + Crear otro negocio
                     </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <Button
+                  variant={isOnPanel ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => navigate('/crear-negocio')}
+                >
+                  Mi Panel
+                </Button>
+              )
             )}
 
             {session.role === 'admin' && (
@@ -112,13 +129,22 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigate('/login')}
-              >
-                Iniciar sesión
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => navigate('/register')}
+                >
+                  Registrarse
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate('/login')}
+                >
+                  Iniciar sesión
+                </Button>
+              </div>
             )}
           </nav>
         </div>

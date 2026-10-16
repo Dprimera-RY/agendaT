@@ -17,8 +17,16 @@ interface AuthState {
   setSession: (s: Session) => void
   setLoading: (b: boolean) => void
   fetchMe: () => Promise<void>
-  loginAdmin: (username: string, password: string) => Promise<boolean>
-  loginOwner: (username: string, password: string) => Promise<boolean>
+  // Login unificado: detecta rol automáticamente
+  login: (username: string, password: string) => Promise<{ ok: boolean; redirect?: string; role?: string }>
+  // Registro de nuevo dueño
+  register: (data: {
+    name: string
+    username: string
+    password: string
+    email?: string
+    phone?: string
+  }) => Promise<{ ok: boolean; redirect?: string }>
   logout: () => Promise<void>
 }
 
@@ -36,32 +44,45 @@ export const useAuth = create<AuthState>((set) => ({
       set({ session: { role: null }, loading: false })
     }
   },
-  loginAdmin: async (username, password) => {
-    const res = await fetch('/api/auth/login-admin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    })
-    if (!res.ok) return false
-    const data = await res.json()
-    // Volver a cargar businesses
-    const meRes = await fetch('/api/auth/me')
-    const meData = await meRes.json()
-    set({ session: meData })
-    return true
+  login: async (username, password) => {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        return { ok: false }
+      }
+      // Volver a cargar la sesión completa (incluye businesses)
+      const meRes = await fetch('/api/auth/me')
+      const meData = await meRes.json()
+      set({ session: meData })
+      return { ok: true, redirect: data.redirect, role: data.role }
+    } catch {
+      return { ok: false }
+    }
   },
-  loginOwner: async (username, password) => {
-    const res = await fetch('/api/auth/login-owner', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    })
-    if (!res.ok) return false
-    const data = await res.json()
-    const meRes = await fetch('/api/auth/me')
-    const meData = await meRes.json()
-    set({ session: meData })
-    return true
+  register: async (data) => {
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      })
+      const result = await res.json()
+      if (!res.ok) {
+        return { ok: false }
+      }
+      // El backend ya hizo setSession, ahora sincronizamos el frontend
+      const meRes = await fetch('/api/auth/me')
+      const meData = await meRes.json()
+      set({ session: meData })
+      return { ok: true, redirect: result.redirect }
+    } catch {
+      return { ok: false }
+    }
   },
   logout: async () => {
     await fetch('/api/auth/logout', { method: 'POST' })
