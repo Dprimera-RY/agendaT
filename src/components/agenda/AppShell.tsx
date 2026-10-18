@@ -299,7 +299,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             className="inline-flex items-center gap-1 hover:text-primary underline underline-offset-2"
           >
             <FileText className="h-3.5 w-3.5" />
-            Términos y Condiciones y Uso de Datos
+            Términos, Condiciones y Uso de Datos
           </button>
           <span>Desarrollado por <b>rycode</b> D'Primera RY</span>
         </div>
