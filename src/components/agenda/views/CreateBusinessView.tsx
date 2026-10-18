@@ -3,12 +3,14 @@
 import { useEffect, useState } from 'react'
 import { useRouterStore } from '@/lib/stores/router-store'
 import { useAuth } from '@/lib/stores/auth-store'
+import { CUBA_PROVINCES } from '@/lib/provinces'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ImageField } from '@/components/agenda/ImageField'
 import { toast } from 'sonner'
 import { ArrowLeft, Building2, Sparkles, Check } from 'lucide-react'
 
@@ -30,6 +32,7 @@ export function CreateBusinessView() {
     slug: '',
     description: '',
     address: '',
+    province: '',
     phone: session.role === 'owner' ? '' : '',
     email: '',
     categoryId: '',
@@ -120,26 +123,24 @@ export function CreateBusinessView() {
                     setForm({
                       ...form,
                       name,
-                      slug: form.slug || slugify(name),
+                      slug: slugify(name),
                     })
                   }}
                   placeholder="Estudio Aura"
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="biz-slug">URL pública *</Label>
+                <Label htmlFor="biz-slug">URL pública (auto) *</Label>
                 <div className="flex items-center">
                   <span className="text-xs text-muted-foreground pr-2 border-r h-10 flex items-center">
                     /negocio/
                   </span>
                   <Input
                     id="biz-slug"
-                    className="rounded-l-none ml-1"
+                    className="rounded-l-none ml-1 bg-muted/50 cursor-not-allowed"
                     value={form.slug}
-                    onChange={(e) =>
-                      setForm({ ...form, slug: slugify(e.target.value) })
-                    }
-                    placeholder="estudio-aura"
+                    readOnly
+                    placeholder="Se genera desde el nombre"
                   />
                 </div>
               </div>
@@ -187,6 +188,20 @@ export function CreateBusinessView() {
                 />
               </div>
               <div className="space-y-1.5">
+                <Label>Provincia</Label>
+                <Select value={form.province || 'none'} onValueChange={(v) => setForm({ ...form, province: v === 'none' ? '' : v })}>
+                  <SelectTrigger aria-label="Provincia">
+                    <SelectValue placeholder="Selecciona una provincia" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sin provincia</SelectItem>
+                    {CUBA_PROVINCES.map((p) => (
+                      <SelectItem key={p} value={p}>{p}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
                 <Label htmlFor="biz-phone">Teléfono / WhatsApp</Label>
                 <Input
                   id="biz-phone"
@@ -208,14 +223,11 @@ export function CreateBusinessView() {
               />
             </div>
 
-            <div className="space-y-1.5">
-              <Label>Logotipo (URL)</Label>
-              <Input
-                value={form.logo}
-                onChange={(e) => setForm({ ...form, logo: e.target.value })}
-                placeholder="https://... (opcional, puedes añadirlo después)"
-              />
-            </div>
+            <ImageField
+              label="Logotipo (opcional, puedes añadirlo después)"
+              value={form.logo}
+              onChange={(url) => setForm({ ...form, logo: url })}
+            />
 
             <Button type="submit" size="lg" className="w-full" disabled={loading}>
               {loading ? 'Creando...' : 'Crear negocio'}

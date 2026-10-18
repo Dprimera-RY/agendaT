@@ -27,10 +27,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
   }
   try {
-    const { businessId, dayOfWeek, startTime, endTime, active } = await req.json()
+    const { businessId, dayOfWeek, startTime, endTime, active, breakStart, breakEnd } = await req.json()
     if (!businessId || dayOfWeek === undefined || !startTime || !endTime) {
       return NextResponse.json(
         { error: 'Faltan campos' },
+        { status: 400 }
+      )
+    }
+    const timeRe = /^\d{2}:\d{2}$/
+    const bs = typeof breakStart === 'string' && timeRe.test(breakStart) ? breakStart : null
+    const be = typeof breakEnd === 'string' && timeRe.test(breakEnd) ? breakEnd : null
+    if ((bs && !be) || (!bs && be)) {
+      return NextResponse.json(
+        { error: 'El horario de almuerzo necesita inicio y fin (o ninguno)' },
+        { status: 400 }
+      )
+    }
+    if (bs && be && bs >= be) {
+      return NextResponse.json(
+        { error: 'El inicio del almuerzo debe ser antes del fin' },
         { status: 400 }
       )
     }
@@ -50,11 +65,11 @@ export async function POST(req: NextRequest) {
     if (existing) {
       result = await db.availability.update({
         where: { id: existing.id },
-        data: { startTime, endTime, active: active ?? true },
+        data: { startTime, endTime, active: active ?? true, breakStart: bs, breakEnd: be },
       })
     } else {
       result = await db.availability.create({
-        data: { businessId, dayOfWeek, startTime, endTime, active: active ?? true },
+        data: { businessId, dayOfWeek, startTime, endTime, active: active ?? true, breakStart: bs, breakEnd: be },
       })
     }
     return NextResponse.json(result)

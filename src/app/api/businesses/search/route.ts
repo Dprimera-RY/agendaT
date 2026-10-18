@@ -1,19 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { dayOfWeek } from '@/lib/datetime'
+import { isValidProvince } from '@/lib/provinces'
 
 // Búsqueda avanzada de disponibilidad:
-// Filtra negocios por categoría y verifica si tienen al menos un slot
+// Filtra negocios por categoría y/o provincia y verifica si tienen al menos un slot
 // disponible en una fecha/hora específica.
 //
 // Parámetros:
 //   categoryId (opcional): filtrar por tipo de negocio
+//   province (opcional): filtrar por provincia de Cuba
 //   date (requerido): YYYY-MM-DD
 //   time (opcional): HH:mm — si se pasa, busca negocios con slot libre a esa hora
 //   durationMin (opcional, default 60): duración del servicio a buscar
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const categoryId = searchParams.get('categoryId') || undefined
+  const provinceParam = searchParams.get('province')
+  const province = isValidProvince(provinceParam) ? provinceParam : undefined
   const dateStr = searchParams.get('date')
   const timeStr = searchParams.get('time')
   const durationMin = Number(searchParams.get('durationMin') || 60)
@@ -35,7 +39,10 @@ export async function GET(req: NextRequest) {
 
   // Traer todos los negocios activos con licencia válida
   const businesses = await db.business.findMany({
-    where: categoryId ? { categoryId } : {},
+    where: {
+      ...(categoryId && { categoryId }),
+      ...(province && { province }),
+    },
     include: {
       category: true,
       license: true,
@@ -49,6 +56,7 @@ export async function GET(req: NextRequest) {
           },
           status: { in: ['pendiente', 'confirmada'] },
         },
+        include: { service: true },
       },
     },
   })
@@ -75,7 +83,7 @@ export async function GET(req: NextRequest) {
 
     // Slots basados en la duración solicitada
     const slots: { start: string; available: boolean }[] = []
-    const cursor = new Date(dayStart)
+    let cursor = new Date(dayStart)
     while (cursor < dayEnd) {
       const slotEnd = new Date(cursor.getTime() + durationMin * 60 * 1000)
       if (slotEnd > dayEnd) break

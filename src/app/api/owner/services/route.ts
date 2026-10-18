@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
   }
   try {
-    const { businessId, name, description, price, durationMin } = await req.json()
+    const { businessId, name, description, price, durationMin, color } = await req.json()
     if (!businessId || !name || price === undefined) {
       return NextResponse.json({ error: 'Faltan campos' }, { status: 400 })
     }
@@ -34,6 +34,9 @@ export async function POST(req: NextRequest) {
     if (session.role === 'owner' && business.ownerId !== session.ownerId) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
     }
+    if (color !== undefined && color !== null && color !== '' && !/^#[0-9a-fA-F]{6}$/.test(color)) {
+      return NextResponse.json({ error: 'Color inválido (usa #rrggbb)' }, { status: 400 })
+    }
     const service = await db.service.create({
       data: {
         businessId,
@@ -41,6 +44,7 @@ export async function POST(req: NextRequest) {
         description,
         price: Number(price),
         durationMin: Number(durationMin) || 30,
+        color: color || null,
       },
     })
     return NextResponse.json(service, { status: 201 })
@@ -56,7 +60,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
   }
   try {
-    const { id, name, description, price, durationMin, active } = await req.json()
+    const { id, name, description, price, durationMin, active, color } = await req.json()
     if (!id) {
       return NextResponse.json({ error: 'id requerido' }, { status: 400 })
     }
@@ -70,6 +74,9 @@ export async function PATCH(req: NextRequest) {
     if (session.role === 'owner' && service.business.ownerId !== session.ownerId) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
     }
+    if (color !== undefined && color !== null && color !== '' && !/^#[0-9a-fA-F]{6}$/.test(color)) {
+      return NextResponse.json({ error: 'Color inválido (usa #rrggbb)' }, { status: 400 })
+    }
     const updated = await db.service.update({
       where: { id },
       data: {
@@ -78,6 +85,7 @@ export async function PATCH(req: NextRequest) {
         ...(price !== undefined && { price: Number(price) }),
         ...(durationMin !== undefined && { durationMin: Number(durationMin) }),
         ...(active !== undefined && { active }),
+        ...(color !== undefined && { color: color || null }),
       },
     })
     return NextResponse.json(updated)

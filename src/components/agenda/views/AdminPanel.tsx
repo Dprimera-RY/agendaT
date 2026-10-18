@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import {
   ShieldCheck,
   Building2,
@@ -13,20 +13,42 @@ import {
   XCircle,
   AlertTriangle,
   Calendar as CalIcon,
+  ChevronRight,
+  Tags,
+  Pencil,
+  TrendingUp,
+  Eye,
+  CalendarCheck,
+  Wallet,
+  Settings,
+  Save,
+  Headset,
 } from 'lucide-react'
 import { useRouterStore } from '@/lib/stores/router-store'
 import { useAuth } from '@/lib/stores/auth-store'
+import { CUBA_PROVINCES } from '@/lib/provinces'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
+import {
+  Bar,
+  BarChart,
+  Area,
+  AreaChart,
+  CartesianGrid,
+  Cell,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import { toast } from 'sonner'
-
-const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+import * as LucideIcons from 'lucide-react'
 
 interface Owner {
   id: string
@@ -42,6 +64,10 @@ interface AdminBusiness {
   id: string
   slug: string
   name: string
+  description?: string | null
+  address?: string | null
+  phone?: string | null
+  email?: string | null
   createdAt: string
   category: { id: string; name: string; slug: string }
   owner: { id: string; username: string; name: string }
@@ -70,6 +96,142 @@ interface Category {
   name: string
   slug: string
   icon: string
+  description?: string | null
+  _count?: { businesses: number }
+}
+
+interface BusinessMetrics {
+  visits: number
+  appointments: number
+  pending: number
+  confirmed: number
+  completed: number
+  cancelled: number
+  revenue: number
+}
+
+interface Stats {
+  totals: {
+    businesses: number
+    owners: number
+    categories: number
+    appointments: number
+    visits: number
+    activeLicenses: number
+    services: number
+  }
+  appointmentsThisWeek: number
+  appointmentsLastWeek: number
+  appointmentsByStatus: { status: string; count: number }[]
+  appointmentsByDay: { date: string; count: number }[]
+  topBusinessesByVisits: { id: string; name: string; slug: string; count: number }[]
+  topBusinessesByAppointments: { id: string; name: string; slug: string; count: number }[]
+  topServices: { name: string; count: number }[]
+  businessMetrics: Record<string, BusinessMetrics>
+}
+
+interface Plan {
+  id: string
+  name: string
+  durationDays: number
+  price: number
+  active: boolean
+}
+
+interface PaymentCode {
+  id: string
+  code: string
+  businessId: string
+  planName: string
+  price: number
+  durationDays: number
+  status: string // pendiente | pagada | rechazada
+  createdAt: string
+  business: { name: string; slug: string }
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  pendiente: 'Pendiente',
+  confirmada: 'Confirmada',
+  completada: 'Completada',
+  cancelada: 'Cancelada',
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  pendiente: 'var(--chart-3)',
+  confirmada: 'var(--chart-4)',
+  completada: 'var(--chart-1)',
+  cancelada: 'var(--chart-5)',
+}
+
+const ICON_SUGGESTIONS = [
+  'Scissors',
+  'Sparkles',
+  'Flower2',
+  'Hand',
+  'Smile',
+  'Activity',
+  'Brush',
+  'Wrench',
+  'PawPrint',
+  'Camera',
+  'Heart',
+  'Gem',
+]
+
+// Catálogo estático de iconos para categorías. react-hooks/static-components no
+// permite resolver iconos con lookup dinámico en el render, así que las
+// referencias se declaran aquí y se indexan por nombre.
+const CATEGORY_ICONS: Record<string, LucideIcons.LucideIcon> = {
+  Scissors: LucideIcons.Scissors,
+  Sparkles: LucideIcons.Sparkles,
+  Flower2: LucideIcons.Flower2,
+  Hand: LucideIcons.Hand,
+  Smile: LucideIcons.Smile,
+  Activity: LucideIcons.Activity,
+  Brush: LucideIcons.Brush,
+  Wrench: LucideIcons.Wrench,
+  PawPrint: LucideIcons.PawPrint,
+  Camera: LucideIcons.Camera,
+  Heart: LucideIcons.Heart,
+  Gem: LucideIcons.Gem,
+  ShoppingBag: LucideIcons.ShoppingBag,
+  Cpu: LucideIcons.Cpu,
+  GraduationCap: LucideIcons.GraduationCap,
+  Music: LucideIcons.Music,
+  Plane: LucideIcons.Plane,
+  BookOpen: LucideIcons.BookOpen,
+  Dumbbell: LucideIcons.Dumbbell,
+  Car: LucideIcons.Car,
+  Pizza: LucideIcons.Pizza,
+  Coffee: LucideIcons.Coffee,
+  House: LucideIcons.House,
+  Laptop: LucideIcons.Laptop,
+  Smartphone: LucideIcons.Smartphone,
+  Shirt: LucideIcons.Shirt,
+  Baby: LucideIcons.Baby,
+  Palette: LucideIcons.Palette,
+  Pill: LucideIcons.Pill,
+  Stethoscope: LucideIcons.Stethoscope,
+}
+
+function CategoryIcon({ name, className }: { name?: string; className?: string }) {
+  const Icon = (name && CATEGORY_ICONS[name]) || LucideIcons.Sparkles
+  return <Icon className={className} />
+}
+
+function truncLabel(s: string, max = 14) {
+  return s.length > max ? s.slice(0, max - 1) + '…' : s
+}
+
+function slugify(s: string) {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
 }
 
 export function AdminPanel() {
@@ -80,6 +242,7 @@ export function AdminPanel() {
   const [businesses, setBusinesses] = useState<AdminBusiness[]>([])
   const [licenses, setLicenses] = useState<License[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
 
   // Form: crear owner
@@ -89,6 +252,7 @@ export function AdminPanel() {
   // Form: crear negocio
   const [showBizForm, setShowBizForm] = useState(false)
   const [bizForm, setBizForm] = useState({
+    province: '',
     name: '',
     slug: '',
     description: '',
@@ -104,6 +268,30 @@ export function AdminPanel() {
   const [showLicForm, setShowLicForm] = useState(false)
   const [licForm, setLicForm] = useState({ businessId: '', addDays: '30' })
 
+  // Form: crear/editar categoría
+  const [showCatForm, setShowCatForm] = useState(false)
+  const [catForm, setCatForm] = useState({ id: '', name: '', slug: '', icon: '', description: '' })
+
+  // Dialog: detalle de negocio (click en cards / barras de gráficas)
+  const [detailBusiness, setDetailBusiness] = useState<AdminBusiness | null>(null)
+
+  const [supportPhone, setSupportPhone] = useState('')
+
+  // Planes de suscripción (precios)
+  const [plans, setPlans] = useState<Plan[]>([])
+  const [showPlanForm, setShowPlanForm] = useState(false)
+  const [planForm, setPlanForm] = useState({ name: '', durationDays: '30', price: '' })
+
+  // Búsquedas en tablas
+  const [bizSearch, setBizSearch] = useState('')
+  const [ownerSearch, setOwnerSearch] = useState('')
+  const [licSearch, setLicSearch] = useState('')
+
+  // Códigos de pago de los dueños (tab Licencias)
+  const [paymentCodes, setPaymentCodes] = useState<PaymentCode[]>([])
+  const [payCodeInput, setPayCodeInput] = useState('')
+  const [applyingCode, setApplyingCode] = useState(false)
+
   useEffect(() => {
     // Esperar a que termine la carga de la sesión antes de decidir
     if (authLoading) return
@@ -114,18 +302,25 @@ export function AdminPanel() {
   }, [session.role, authLoading, navigate])
 
   const loadAll = useCallback(async () => {
-    setLoading(true)
     try {
-      const [o, b, l, c] = await Promise.all([
+      const [o, b, l, c, s, cfg, pl, pc] = await Promise.all([
         fetch('/api/admin/owners').then((r) => r.json()),
         fetch('/api/admin/businesses').then((r) => r.json()),
         fetch('/api/admin/licenses').then((r) => r.json()),
         fetch('/api/categories').then((r) => r.json()),
+        fetch('/api/admin/stats').then((r) => r.json()),
+        fetch('/api/admin/settings').then((r) => r.json()),
+        fetch('/api/admin/plans').then((r) => r.json()),
+        fetch('/api/admin/payment-codes').then((r) => r.json()),
       ])
       setOwners(o)
       setBusinesses(b)
       setLicenses(l)
       setCategories(c)
+      if (!s?.error) setStats(s)
+      if (cfg?.supportPhone) setSupportPhone(cfg.supportPhone)
+      if (Array.isArray(pl)) setPlans(pl)
+      if (Array.isArray(pc)) setPaymentCodes(pc)
     } catch {
       toast.error('Error al cargar datos')
     } finally {
@@ -134,10 +329,161 @@ export function AdminPanel() {
   }, [])
 
   useEffect(() => {
-    if (session.role === 'admin') loadAll()
+    if (session.role !== 'admin') return
+    // setTimeout: la carga inicial no debe correr como setState síncrono del effect
+    const t = setTimeout(() => {
+      void loadAll()
+    }, 0)
+    return () => clearTimeout(t)
   }, [session.role, loadAll])
 
+  // === Búsquedas en tablas ===
+  const norm = (s: string) => s.toLowerCase().trim()
+
+  const filteredBusinesses = useMemo(() => {
+    const q = norm(bizSearch)
+    if (!q) return businesses
+    return businesses.filter((b) =>
+      [b.name, b.slug, b.owner.name, b.owner.username, b.category.name, b.address || '']
+        .join(' ')
+        .toLowerCase()
+        .includes(q)
+    )
+  }, [businesses, bizSearch])
+
+  const filteredOwners = useMemo(() => {
+    const q = norm(ownerSearch)
+    if (!q) return owners
+    return owners.filter((o) =>
+      [o.name, o.username, o.email || '', o.phone || ''].join(' ').toLowerCase().includes(q)
+    )
+  }, [owners, ownerSearch])
+
+  const filteredLicenses = useMemo(() => {
+    const q = norm(licSearch)
+    if (!q) return licenses
+    return licenses.filter((l) =>
+      [l.business.name, l.business.slug].join(' ').toLowerCase().includes(q)
+    )
+  }, [licenses, licSearch])
+
+  // === Códigos de pago (asesor) ===
+  const applyPaymentCode = async (code?: string) => {
+    const c = (code ?? payCodeInput).trim()
+    if (!/^\d{6}$/.test(c)) {
+      toast.error('Introduce un código de 6 dígitos')
+      return
+    }
+    setApplyingCode(true)
+    try {
+      const res = await fetch('/api/admin/payment-codes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: c }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Error')
+      toast.success(`Pago aplicado a ${data.business}`, {
+        description: `Plan ${data.plan} · ${data.durationDays} días · vence ${new Date(data.endDate).toLocaleDateString('es-ES')}`,
+      })
+      setPayCodeInput('')
+      void loadAll()
+    } catch (e: any) {
+      toast.error(e.message || 'Error al aplicar el código')
+    } finally {
+      setApplyingCode(false)
+    }
+  }
+
+  const rejectPaymentCode = async (id: string) => {
+    try {
+      const res = await fetch('/api/admin/payment-codes', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Error')
+      toast.success('Código rechazado')
+      void loadAll()
+    } catch (e: any) {
+      toast.error(e.message || 'Error')
+    }
+  }
+
   // === Acciones ===
+  const saveSettings = async () => {
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'supportPhone', value: supportPhone }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success('Ajustes guardados')
+    } catch (e: any) {
+      toast.error(e.message || 'Error al guardar')
+    }
+  }
+
+  const createPlan = async () => {
+    if (!planForm.name || !planForm.price || !planForm.durationDays) {
+      toast.error('Completa nombre, precio y duración')
+      return
+    }
+    try {
+      const res = await fetch('/api/admin/plans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: planForm.name,
+          price: Number(planForm.price),
+          durationDays: Number(planForm.durationDays),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setPlans((p) => [...p, data].sort((a, b) => a.durationDays - b.durationDays))
+      setPlanForm({ name: '', durationDays: '30', price: '' })
+      setShowPlanForm(false)
+      toast.success('Plan creado')
+    } catch (e: any) {
+      toast.error(e.message || 'Error al crear')
+    }
+  }
+
+  const savePlan = async (plan: { id: string; name: string; price: number; durationDays: number }) => {
+    try {
+      const res = await fetch('/api/admin/plans', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(plan),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setPlans((p) => p.map((x) => (x.id === data.id ? data : x)))
+      toast.success('Plan actualizado')
+    } catch (e: any) {
+      toast.error(e.message || 'Error al guardar')
+    }
+  }
+
+  const togglePlan = async (plan: Plan) => {
+    try {
+      const res = await fetch('/api/admin/plans', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: plan.id, active: !plan.active }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setPlans((p) => p.map((x) => (x.id === data.id ? data : x)))
+    } catch (e: any) {
+      toast.error(e.message || 'Error')
+    }
+  }
+
   const createOwner = async () => {
     if (!ownerForm.username || !ownerForm.password || !ownerForm.name) {
       toast.error('Completa campos obligatorios')
@@ -172,7 +518,8 @@ export function AdminPanel() {
   }
 
   const createBusiness = async () => {
-    if (!bizForm.name || !bizForm.slug || !bizForm.ownerId || !bizForm.categoryId) {
+    const finalSlug = bizForm.slug || slugify(bizForm.name)
+    if (!bizForm.name || !finalSlug || !bizForm.ownerId || !bizForm.categoryId) {
       toast.error('Completa campos obligatorios')
       return
     }
@@ -180,13 +527,13 @@ export function AdminPanel() {
       const res = await fetch('/api/admin/businesses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bizForm),
+        body: JSON.stringify({ ...bizForm, slug: finalSlug }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       toast.success('Negocio creado')
       setShowBizForm(false)
-      setBizForm({ name: '', slug: '', description: '', address: '', phone: '', email: '', ownerId: '', categoryId: '', licenseDays: '30' })
+      setBizForm({ name: '', slug: '', description: '', address: '', province: '', phone: '', email: '', ownerId: '', categoryId: '', licenseDays: '30' })
       await loadAll()
     } catch (e: any) {
       toast.error(e.message)
@@ -244,6 +591,50 @@ export function AdminPanel() {
     }
   }
 
+  const openCatForm = (c?: Category) => {
+    setCatForm(
+      c
+        ? { id: c.id, name: c.name, slug: c.slug, icon: c.icon || '', description: c.description || '' }
+        : { id: '', name: '', slug: '', icon: '', description: '' }
+    )
+    setShowCatForm(true)
+  }
+
+  const saveCategory = async () => {
+    if (!catForm.name.trim()) {
+      toast.error('El nombre es obligatorio')
+      return
+    }
+    try {
+      const isEdit = Boolean(catForm.id)
+      const res = await fetch('/api/admin/categories', {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(catForm),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success(isEdit ? 'Categoría actualizada' : 'Categoría creada')
+      setShowCatForm(false)
+      await loadAll()
+    } catch (e: any) {
+      toast.error(e.message || 'Error')
+    }
+  }
+
+  const deleteCategory = async (id: string) => {
+    if (!confirm('¿Eliminar esta categoría? Solo es posible si no tiene negocios asociados.')) return
+    try {
+      const res = await fetch(`/api/admin/categories?id=${id}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success('Categoría eliminada')
+      await loadAll()
+    } catch (e: any) {
+      toast.error(e.message || 'Error al eliminar')
+    }
+  }
+
   // Si la sesión sigue cargando, mostrar skeleton
   if (authLoading || session.role === null) {
     return (
@@ -284,6 +675,20 @@ export function AdminPanel() {
   })
   const expired = licenses.filter((l) => l.active && new Date(l.endDate) < new Date())
 
+  const openBusinessDetail = (id: string) => {
+    const b = businesses.find((x) => x.id === id)
+    if (b) setDetailBusiness(b)
+  }
+
+  const weekDelta =
+    stats && stats.appointmentsLastWeek > 0
+      ? Math.round(
+          ((stats.appointmentsThisWeek - stats.appointmentsLastWeek) /
+            stats.appointmentsLastWeek) *
+            100
+        )
+      : null
+
   return (
     <div className="container mx-auto px-4 py-6 space-y-6">
       <div className="flex items-center gap-3">
@@ -292,12 +697,12 @@ export function AdminPanel() {
         </div>
         <div>
           <h1 className="text-2xl font-bold">Panel de administración</h1>
-          <p className="text-sm text-muted-foreground">Gestión de negocios, dueños y licencias</p>
+          <p className="text-sm text-muted-foreground">Gestión de negocios, dueños, categorías, licencias y analítica</p>
         </div>
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
+        <TabsList className="grid w-full grid-cols-2 md:grid-cols-6">
           <TabsTrigger value="overview">Resumen</TabsTrigger>
           <TabsTrigger value="businesses">
             <Building2 className="h-4 w-4 mr-1 md:mr-0" />
@@ -307,47 +712,61 @@ export function AdminPanel() {
             <Users className="h-4 w-4 mr-1 md:mr-0" />
             <span className="md:ml-1">Dueños</span>
           </TabsTrigger>
+          <TabsTrigger value="categories">
+            <Tags className="h-4 w-4 mr-1 md:mr-0" />
+            <span className="md:ml-1">Categorías</span>
+          </TabsTrigger>
           <TabsTrigger value="licenses">
             <KeyRound className="h-4 w-4 mr-1 md:mr-0" />
             <span className="md:ml-1">Licencias</span>
+          </TabsTrigger>
+          <TabsTrigger value="settings">
+            <Settings className="h-4 w-4 mr-1 md:mr-0" />
+            <span className="md:ml-1">Ajustes</span>
           </TabsTrigger>
         </TabsList>
 
         {/* OVERVIEW */}
         <TabsContent value="overview" className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Card>
-              <CardContent className="p-4">
-                <div className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Building2 className="h-3 w-3" />Negocios
-                </div>
-                <div className="text-3xl font-bold">{businesses.length}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Users className="h-3 w-3" />Dueños
-                </div>
-                <div className="text-3xl font-bold">{owners.length}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="text-xs text-muted-foreground flex items-center gap-1">
-                  <KeyRound className="h-3 w-3" />Licencias activas
-                </div>
-                <div className="text-3xl font-bold text-green-600">{totalActiveLicenses}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="text-xs text-muted-foreground flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3" />Por expirar
-                </div>
-                <div className="text-3xl font-bold text-amber-600">{expiringSoon.length + expired.length}</div>
-              </CardContent>
-            </Card>
+          {/* KPIs clickeables: cada card lleva a su tab */}
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+            <KpiCard
+              icon={Building2}
+              label="Negocios"
+              value={businesses.length}
+              sub="Ver listado completo"
+              onClick={() => setTab('businesses')}
+            />
+            <KpiCard
+              icon={Users}
+              label="Dueños"
+              value={owners.length}
+              sub="Ver listado completo"
+              onClick={() => setTab('owners')}
+            />
+            <KpiCard
+              icon={Tags}
+              label="Categorías"
+              value={categories.length}
+              sub="Crear y editar"
+              onClick={() => setTab('categories')}
+            />
+            <KpiCard
+              icon={KeyRound}
+              label="Licencias activas"
+              value={totalActiveLicenses}
+              tone="text-green-600"
+              sub="Ver licencias"
+              onClick={() => setTab('licenses')}
+            />
+            <KpiCard
+              icon={AlertTriangle}
+              label="Por expirar"
+              value={expiringSoon.length + expired.length}
+              tone="text-amber-600"
+              sub="Revisar urgente"
+              onClick={() => setTab('licenses')}
+            />
           </div>
 
           {expired.length > 0 && (
@@ -406,19 +825,278 @@ export function AdminPanel() {
               </CardContent>
             </Card>
           )}
+
+          {/* ANALÍTICA */}
+          {stats && (
+            <div className="space-y-4 pt-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="flex items-center gap-2 text-xl font-semibold">
+                  <TrendingUp className="h-5 w-5 text-primary" />
+                  Analítica para toma de decisiones
+                </h2>
+                <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 font-medium text-primary">
+                    <CalendarCheck className="h-3.5 w-3.5" />
+                    {stats.appointmentsThisWeek} citas esta semana
+                  </span>
+                  {weekDelta !== null && (
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-medium ${weekDelta >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                      <TrendingUp className={`h-3.5 w-3.5 ${weekDelta < 0 ? 'rotate-180' : ''}`} />
+                      {weekDelta >= 0 ? '+' : ''}{weekDelta}% vs sem. anterior
+                    </span>
+                  )}
+                  <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1">
+                    <Eye className="h-3.5 w-3.5" />
+                    {stats.totals.visits} visitas totales
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1">
+                    <Wallet className="h-3.5 w-3.5" />
+                    ${stats.totals.appointments > 0
+                      ? Object.values(stats.businessMetrics).reduce((a, m) => a + m.revenue, 0).toLocaleString('es-ES')
+                      : 0}{' '}
+                    completados
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-3">
+                {/* Citas por día */}
+                <Card className="lg:col-span-2">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Citas agendadas — últimos 30 días</CardTitle>
+                    <CardDescription>Volumen diario de reservas</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ChartContainer
+                      config={{ citas: { label: 'Citas', color: 'var(--chart-1)' } }}
+                      className="h-[220px] w-full"
+                    >
+                      <AreaChart data={stats.appointmentsByDay} margin={{ left: -18, right: 8, top: 4 }}>
+                        <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                        <XAxis
+                          dataKey="date"
+                          tickLine={false}
+                          axisLine={false}
+                          tickMargin={8}
+                          tickFormatter={(v: string) => {
+                            const [, m, d] = v.split('-')
+                            return `${Number(d)}/${Number(m)}`
+                          }}
+                          interval="preserveStartEnd"
+                        />
+                        <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={40} />
+                        <ChartTooltip content={<ChartTooltipContent />} />
+                        <Area
+                          dataKey="count"
+                          type="monotone"
+                          fill="var(--color-citas)"
+                          stroke="var(--color-citas)"
+                          fillOpacity={0.2}
+                          name="Citas"
+                        />
+                      </AreaChart>
+                    </ChartContainer>
+                  </CardContent>
+                </Card>
+
+                {/* Citas por estado */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Citas por estado</CardTitle>
+                    <CardDescription>{stats.totals.appointments} en total</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ChartContainer
+                      config={{
+                        pendiente: { label: 'Pendiente', color: STATUS_COLORS.pendiente },
+                        confirmada: { label: 'Confirmada', color: STATUS_COLORS.confirmada },
+                        completada: { label: 'Completada', color: STATUS_COLORS.completada },
+                        cancelada: { label: 'Cancelada', color: STATUS_COLORS.cancelada },
+                      }}
+                      className="h-[220px] w-full"
+                    >
+                      <BarChart data={stats.appointmentsByStatus} margin={{ left: -18, right: 8, top: 4 }}>
+                        <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                        <XAxis
+                          dataKey="status"
+                          tickLine={false}
+                          axisLine={false}
+                          tickFormatter={(v: string) => STATUS_LABELS[v] || v}
+                        />
+                        <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={40} />
+                        <ChartTooltip content={<ChartTooltipContent />} />
+                        <Bar dataKey="count" radius={[6, 6, 0, 0]} name="Citas">
+                          {stats.appointmentsByStatus.map((s) => (
+                            <Cell key={s.status} fill={STATUS_COLORS[s.status] || 'var(--chart-2)'} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ChartContainer>
+                  </CardContent>
+                </Card>
+
+                {/* Top visitados (click → detalle del negocio) */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Negocios más visitados</CardTitle>
+                    <CardDescription>Click en una barra para ver el detalle</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {stats.topBusinessesByVisits.length === 0 ? (
+                      <p className="py-10 text-center text-sm text-muted-foreground">
+                        Aún no hay visitas registradas.
+                      </p>
+                    ) : (
+                      <ChartContainer
+                        config={{ visitas: { label: 'Visitas', color: 'var(--chart-4)' } }}
+                        className="h-[220px] w-full"
+                      >
+                        <BarChart
+                          data={stats.topBusinessesByVisits}
+                          layout="vertical"
+                          margin={{ left: 4, right: 16, top: 4 }}
+                        >
+                          <CartesianGrid horizontal={false} strokeDasharray="3 3" />
+                          <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} />
+                          <YAxis
+                            type="category"
+                            dataKey="name"
+                            width={96}
+                            tickLine={false}
+                            axisLine={false}
+                            tickFormatter={(v: string) => truncLabel(v)}
+                          />
+                          <ChartTooltip content={<ChartTooltipContent />} />
+                          <Bar
+                            dataKey="count"
+                            fill="var(--color-visitas)"
+                            radius={[0, 6, 6, 0]}
+                            name="Visitas"
+                            cursor="pointer"
+                            onClick={(data: any) => data?.id && openBusinessDetail(data.id)}
+                          />
+                        </BarChart>
+                      </ChartContainer>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Top agendados (click → detalle del negocio) */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Negocios más agendados</CardTitle>
+                    <CardDescription>Click en una barra para ver el detalle</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {stats.topBusinessesByAppointments.length === 0 ? (
+                      <p className="py-10 text-center text-sm text-muted-foreground">
+                        Aún no hay citas registradas.
+                      </p>
+                    ) : (
+                      <ChartContainer
+                        config={{ citas: { label: 'Citas', color: 'var(--chart-1)' } }}
+                        className="h-[220px] w-full"
+                      >
+                        <BarChart
+                          data={stats.topBusinessesByAppointments}
+                          layout="vertical"
+                          margin={{ left: 4, right: 16, top: 4 }}
+                        >
+                          <CartesianGrid horizontal={false} strokeDasharray="3 3" />
+                          <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} />
+                          <YAxis
+                            type="category"
+                            dataKey="name"
+                            width={96}
+                            tickLine={false}
+                            axisLine={false}
+                            tickFormatter={(v: string) => truncLabel(v)}
+                          />
+                          <ChartTooltip content={<ChartTooltipContent />} />
+                          <Bar
+                            dataKey="count"
+                            fill="var(--color-citas)"
+                            radius={[0, 6, 6, 0]}
+                            name="Citas"
+                            cursor="pointer"
+                            onClick={(data: any) => data?.id && openBusinessDetail(data.id)}
+                          />
+                        </BarChart>
+                      </ChartContainer>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Servicios más agendados */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Servicios más agendados</CardTitle>
+                    <CardDescription>Demanda por tipo de servicio</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {stats.topServices.length === 0 ? (
+                      <p className="py-10 text-center text-sm text-muted-foreground">
+                        Aún no hay citas registradas.
+                      </p>
+                    ) : (
+                      <ChartContainer
+                        config={{ citas: { label: 'Citas', color: 'var(--chart-2)' } }}
+                        className="h-[220px] w-full"
+                      >
+                        <BarChart
+                          data={stats.topServices}
+                          layout="vertical"
+                          margin={{ left: 4, right: 16, top: 4 }}
+                        >
+                          <CartesianGrid horizontal={false} strokeDasharray="3 3" />
+                          <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} />
+                          <YAxis
+                            type="category"
+                            dataKey="name"
+                            width={110}
+                            tickLine={false}
+                            axisLine={false}
+                            tickFormatter={(v: string) => truncLabel(v, 16)}
+                          />
+                          <ChartTooltip content={<ChartTooltipContent />} />
+                          <Bar dataKey="count" fill="var(--color-citas)" radius={[0, 6, 6, 0]} name="Citas" />
+                        </BarChart>
+                      </ChartContainer>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          )}
         </TabsContent>
 
         {/* NEGOCIOS */}
         <TabsContent value="businesses" className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <h2 className="text-xl font-semibold">{businesses.length} negocios</h2>
+            <div className="flex items-center gap-2 flex-1 min-w-[220px] max-w-sm">
+              <Input
+                value={bizSearch}
+                onChange={(e) => setBizSearch(e.target.value)}
+                placeholder="Buscar negocio, dueño o categoría..."
+              />
+            </div>
             <Button onClick={() => setShowBizForm(true)}>
               <Plus className="h-4 w-4 mr-1" />Nuevo negocio
             </Button>
           </div>
+          {bizSearch && (
+            <p className="text-xs text-muted-foreground">
+              {filteredBusinesses.length} resultado(s) para “{bizSearch}”
+            </p>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {businesses.map((b) => (
-              <Card key={b.id} className="flex flex-col">
+            {filteredBusinesses.map((b) => (
+              <Card
+                key={b.id}
+                className="flex cursor-pointer flex-col transition-all hover:border-primary/40 hover:shadow-md"
+                onClick={() => setDetailBusiness(b)}
+              >
                 <CardContent className="p-4 flex-1 space-y-2">
                   <div className="flex items-start justify-between gap-2">
                     <div>
@@ -442,7 +1120,7 @@ export function AdminPanel() {
                       </div>
                     )}
                   </div>
-                  <div className="flex gap-2 pt-2 border-t">
+                  <div className="flex gap-2 pt-2 border-t" onClick={(e) => e.stopPropagation()}>
                     <Button
                       size="sm"
                       variant="outline"
@@ -475,14 +1153,26 @@ export function AdminPanel() {
 
         {/* DUEÑOS */}
         <TabsContent value="owners" className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <h2 className="text-xl font-semibold">{owners.length} dueños</h2>
+            <div className="flex items-center gap-2 flex-1 min-w-[220px] max-w-sm">
+              <Input
+                value={ownerSearch}
+                onChange={(e) => setOwnerSearch(e.target.value)}
+                placeholder="Buscar dueño por nombre, usuario o teléfono..."
+              />
+            </div>
             <Button onClick={() => setShowOwnerForm(true)}>
               <Plus className="h-4 w-4 mr-1" />Nuevo dueño
             </Button>
           </div>
+          {ownerSearch && (
+            <p className="text-xs text-muted-foreground">
+              {filteredOwners.length} resultado(s) para “{ownerSearch}”
+            </p>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {owners.map((o) => (
+            {filteredOwners.map((o) => (
               <Card key={o.id}>
                 <CardContent className="p-4 space-y-2">
                   <div className="flex items-start justify-between">
@@ -506,14 +1196,233 @@ export function AdminPanel() {
           </div>
         </TabsContent>
 
+        {/* CATEGORÍAS */}
+        <TabsContent value="categories" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold">{categories.length} categorías</h2>
+            <Button onClick={() => openCatForm()}>
+              <Plus className="h-4 w-4 mr-1" />Nueva categoría
+            </Button>
+          </div>
+          {categories.length === 0 ? (
+            <Card className="border-dashed">
+              <CardContent className="py-12 text-center text-muted-foreground">
+                No hay categorías. Crea la primera para poder clasificar negocios.
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {categories.map((c) => {
+                return (
+                  <Card key={c.id} className="flex flex-col">
+                    <CardContent className="p-4 flex-1 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+                            <CategoryIcon name={c.icon} className="h-5 w-5 text-primary" />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold">{c.name}</h3>
+                            <p className="text-xs text-muted-foreground">/{c.slug}</p>
+                          </div>
+                        </div>
+                        <Badge variant="secondary">{c._count?.businesses || 0} negocios</Badge>
+                      </div>
+                      {c.description && (
+                        <p className="text-xs text-muted-foreground line-clamp-2">{c.description}</p>
+                      )}
+                      <p className="text-[11px] text-muted-foreground">Icono: <code>{c.icon || '—'}</code></p>
+                      <div className="flex gap-2 pt-2 border-t">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex-1"
+                          onClick={() => openCatForm(c)}
+                        >
+                          <Pencil className="h-3.5 w-3.5 mr-1" />Editar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive"
+                          onClick={() => deleteCategory(c.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+          )}
+        </TabsContent>
+
         {/* LICENCIAS */}
         <TabsContent value="licenses" className="space-y-4">
-          <div className="flex items-center justify-between">
+          {/* Planes de suscripción (precios visibles en el tab Licencia del dueño) */}
+          <Card>
+            <CardHeader className="flex-row items-center justify-between space-y-0">
+              <div>
+                <CardTitle>Planes de suscripción</CardTitle>
+                <CardDescription>
+                  Ofertas y precios que verán los dueños en su tab Licencia
+                </CardDescription>
+              </div>
+              <Button size="sm" onClick={() => setShowPlanForm(!showPlanForm)}>
+                <Plus className="h-4 w-4 mr-1" />Nuevo plan
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {showPlanForm && (
+                <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Nombre *</Label>
+                      <Input
+                        value={planForm.name}
+                        onChange={(e) => setPlanForm({ ...planForm, name: e.target.value })}
+                        placeholder="Trimestral"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Duración (días) *</Label>
+                      <Input
+                        type="number"
+                        value={planForm.durationDays}
+                        onChange={(e) => setPlanForm({ ...planForm, durationDays: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Precio (CUP) *</Label>
+                      <Input
+                        type="number"
+                        value={planForm.price}
+                        onChange={(e) => setPlanForm({ ...planForm, price: e.target.value })}
+                        placeholder="1500"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={createPlan}>Crear plan</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setShowPlanForm(false)}>Cancelar</Button>
+                  </div>
+                </div>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {plans.map((p) => (
+                  <PlanCard key={p.id} plan={p} onSave={savePlan} onToggle={togglePlan} />
+                ))}
+                {plans.length === 0 && (
+                  <p className="text-sm text-muted-foreground col-span-full text-center py-4">
+                    Sin planes. Crea el primero.
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Códigos de pago generados por los dueños (al elegir un plan) */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <KeyRound className="h-4 w-4 text-primary" />Códigos de pago
+              </CardTitle>
+              <CardDescription>
+                Los dueños generan un código de 6 dígitos al elegir un plan y lo envían por WhatsApp.
+                Introdlúcelo aquí para aplicar el pago y activar la licencia.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Input
+                  value={payCodeInput}
+                  onChange={(e) => setPayCodeInput(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  inputMode="numeric"
+                  className="w-36 font-mono text-center tracking-[0.3em]"
+                  maxLength={6}
+                />
+                <Button
+                  onClick={() => applyPaymentCode()}
+                  disabled={applyingCode || payCodeInput.length !== 6}
+                >
+                  {applyingCode ? 'Aplicando...' : 'Aplicar pago'}
+                </Button>
+              </div>
+              {paymentCodes.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Aún no hay códigos generados.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="border-b bg-muted/30">
+                      <tr>
+                        <th className="text-left p-2 font-medium">Código</th>
+                        <th className="text-left p-2 font-medium">Negocio</th>
+                        <th className="text-left p-2 font-medium">Plan</th>
+                        <th className="text-right p-2 font-medium">Precio</th>
+                        <th className="text-center p-2 font-medium">Estado</th>
+                        <th className="text-center p-2 font-medium">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paymentCodes.map((pc) => (
+                        <tr key={pc.id} className="border-b">
+                          <td className="p-2 font-mono font-bold tracking-widest">{pc.code}</td>
+                          <td className="p-2">
+                            <div>{pc.business.name}</div>
+                            <div className="text-xs text-muted-foreground">/{pc.business.slug}</div>
+                          </td>
+                          <td className="p-2">{pc.planName} · {pc.durationDays}d</td>
+                          <td className="p-2 text-right">${pc.price.toLocaleString('es-ES')}</td>
+                          <td className="p-2 text-center">
+                            {pc.status === 'pendiente' ? (
+                              <Badge variant="secondary">Pendiente</Badge>
+                            ) : pc.status === 'pagada' ? (
+                              <Badge className="bg-green-600">Pagada</Badge>
+                            ) : (
+                              <Badge variant="destructive">Rechazada</Badge>
+                            )}
+                          </td>
+                          <td className="p-2 text-center">
+                            {pc.status === 'pendiente' && (
+                              <div className="flex items-center justify-center gap-1">
+                                <Button size="sm" onClick={() => applyPaymentCode(pc.code)}>
+                                  Aplicar
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={() => rejectPaymentCode(pc.id)}>
+                                  Rechazar
+                                </Button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <h2 className="text-xl font-semibold">{licenses.length} licencias</h2>
+            <div className="flex items-center gap-2 flex-1 min-w-[220px] max-w-sm">
+              <Input
+                value={licSearch}
+                onChange={(e) => setLicSearch(e.target.value)}
+                placeholder="Buscar licencia por negocio..."
+              />
+            </div>
             <Button onClick={() => setShowLicForm(true)}>
               <Plus className="h-4 w-4 mr-1" />Extender licencia
             </Button>
           </div>
+          {licSearch && (
+            <p className="text-xs text-muted-foreground">
+              {filteredLicenses.length} resultado(s) para “{licSearch}”
+            </p>
+          )}
           <Card>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
@@ -529,9 +1438,9 @@ export function AdminPanel() {
                     </tr>
                   </thead>
                   <tbody>
-                    {licenses.map((l) => {
-                      const expired = new Date(l.endDate) < new Date()
-                      const isExpiring = !expired && (new Date(l.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24) <= 7
+                    {filteredLicenses.map((l) => {
+                      const licExpired = new Date(l.endDate) < new Date()
+                      const isExpiring = !licExpired && (new Date(l.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24) <= 7
                       return (
                         <tr key={l.id} className="border-b hover:bg-muted/30">
                           <td className="p-3">
@@ -543,7 +1452,7 @@ export function AdminPanel() {
                           </td>
                           <td className="p-3">
                             <div>{new Date(l.endDate).toLocaleDateString('es-ES')}</div>
-                            {expired && <div className="text-xs text-red-600">Expirada</div>}
+                            {licExpired && <div className="text-xs text-red-600">Expirada</div>}
                             {isExpiring && <div className="text-xs text-amber-600">Próxima a expirar</div>}
                           </td>
                           <td className="p-3 text-center">{l.durationDays}d</td>
@@ -594,7 +1503,59 @@ export function AdminPanel() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* AJUSTES */}
+        <TabsContent value="settings" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Headset className="h-5 w-5 text-primary" />Soporte a dueños
+              </CardTitle>
+              <CardDescription>
+                Número de WhatsApp al que los dueños de negocios contactarán para pedir ayuda desde su panel
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Número de soporte (con código de país)</Label>
+                  <Input
+                    value={supportPhone}
+                    onChange={(e) => setSupportPhone(e.target.value)}
+                    placeholder="+53 5 123 4567"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Vista previa del enlace</Label>
+                  <div className="text-xs text-muted-foreground rounded-lg border p-2.5 break-all bg-muted/30">
+                    {supportPhone
+                      ? `https://wa.me/${supportPhone.replace(/[^0-9]/g, '')}`
+                      : 'Se mostrará el botón de Soporte en el panel del dueño cuando guardes un número.'}
+                  </div>
+                </div>
+              </div>
+              <Button onClick={saveSettings}>
+                <Save className="h-4 w-4 mr-1" />Guardar ajustes
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
+
+      {/* Dialog: detalle de negocio (click en cards o barras) */}
+      <BusinessDetailDialog
+        business={detailBusiness}
+        metrics={detailBusiness ? stats?.businessMetrics[detailBusiness.id] : undefined}
+        onClose={() => setDetailBusiness(null)}
+        onVisit={(slug) => {
+          setDetailBusiness(null)
+          navigate(`/negocio/${slug}`)
+        }}
+        onPanel={(slug) => {
+          setDetailBusiness(null)
+          navigate(`/negocio/${slug}/panel`)
+        }}
+      />
 
       {/* Dialog: crear dueño */}
       <Dialog open={showOwnerForm} onOpenChange={setShowOwnerForm}>
@@ -649,14 +1610,24 @@ export function AdminPanel() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Nombre *</Label>
-                <Input value={bizForm.name} onChange={(e) => setBizForm({ ...bizForm, name: e.target.value })} />
+                <Input
+                  value={bizForm.name}
+                  onChange={(e) =>
+                    setBizForm({
+                      ...bizForm,
+                      name: e.target.value,
+                      slug: slugify(e.target.value),
+                    })
+                  }
+                />
               </div>
               <div className="space-y-1.5">
-                <Label>Slug (URL) *</Label>
+                <Label>URL pública (auto) *</Label>
                 <Input
-                  value={bizForm.slug}
-                  onChange={(e) => setBizForm({ ...bizForm, slug: e.target.value.toLowerCase().replace(/\s+/g, '-') })}
-                  placeholder="mi-negocio"
+                  value={bizForm.slug ? `/negocio/${bizForm.slug}` : ''}
+                  readOnly
+                  className="bg-muted/50 cursor-not-allowed"
+                  placeholder="Se genera desde el nombre"
                 />
               </div>
             </div>
@@ -696,6 +1667,18 @@ export function AdminPanel() {
               <div className="space-y-1.5">
                 <Label>Teléfono</Label>
                 <Input value={bizForm.phone} onChange={(e) => setBizForm({ ...bizForm, phone: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Provincia</Label>
+                <Select value={bizForm.province || 'none'} onValueChange={(v) => setBizForm({ ...bizForm, province: v === 'none' ? '' : v })}>
+                  <SelectTrigger aria-label="Provincia"><SelectValue placeholder="Selecciona..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sin provincia</SelectItem>
+                    {CUBA_PROVINCES.map((p) => (
+                      <SelectItem key={p} value={p}>{p}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <div className="space-y-1.5">
@@ -749,6 +1732,317 @@ export function AdminPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Dialog: crear/editar categoría */}
+      <Dialog open={showCatForm} onOpenChange={setShowCatForm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{catForm.id ? 'Editar categoría' : 'Nueva categoría'}</DialogTitle>
+            <DialogDescription>
+              Las categorías organizan el catálogo público de negocios
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Nombre *</Label>
+                <Input
+                  value={catForm.name}
+                  onChange={(e) =>
+                    setCatForm({
+                      ...catForm,
+                      name: e.target.value,
+                      // auto-slug mientras no se edite una categoría existente
+                      slug: catForm.id
+                        ? catForm.slug
+                        : e.target.value
+                            .toLowerCase()
+                            .normalize('NFD')
+                            .replace(/[\u0300-\u036f]/g, '')
+                            .replace(/[^a-z0-9]+/g, '-')
+                            .replace(/^-+|-+$/g, ''),
+                    })
+                  }
+                  placeholder="ej. Peluquería"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Slug (URL)</Label>
+                <Input
+                  value={catForm.slug}
+                  onChange={(e) => setCatForm({ ...catForm, slug: e.target.value.toLowerCase().replace(/\s+/g, '-') })}
+                  placeholder="peluqueria"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Icono (Lucide)</Label>
+              <div className="flex items-center gap-2">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                  <CategoryIcon name={catForm.icon} className="h-4 w-4 text-primary" />
+                </div>
+                <Input
+                  value={catForm.icon}
+                  onChange={(e) => setCatForm({ ...catForm, icon: e.target.value })}
+                  placeholder="Scissors"
+                />
+              </div>
+              <div className="flex flex-wrap gap-1 pt-1">
+                {ICON_SUGGESTIONS.map((name) => {
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => setCatForm({ ...catForm, icon: name })}
+                      className={`rounded-md border p-1.5 transition-colors hover:bg-accent ${
+                        catForm.icon === name ? 'border-primary bg-primary/10' : 'border-border'
+                      }`}
+                      title={name}
+                    >
+                      <CategoryIcon name={name} className="h-4 w-4" />
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Descripción</Label>
+              <Input
+                value={catForm.description}
+                onChange={(e) => setCatForm({ ...catForm, description: e.target.value })}
+                placeholder="Cortes, peinados y tratamientos"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCatForm(false)}>Cancelar</Button>
+            <Button onClick={saveCategory}>{catForm.id ? 'Guardar cambios' : 'Crear categoría'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+// ============================================================
+// Subcomponentes
+// ============================================================
+
+function PlanCard({
+  plan,
+  onSave,
+  onToggle,
+}: {
+  plan: Plan
+  onSave: (p: { id: string; name: string; price: number; durationDays: number }) => void
+  onToggle: (p: Plan) => void
+}) {
+  const [name, setName] = useState(plan.name)
+  const [price, setPrice] = useState(String(plan.price))
+  const [days, setDays] = useState(String(plan.durationDays))
+
+  return (
+    <div className={`border rounded-lg p-3 space-y-2 ${plan.active ? '' : 'opacity-60'}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className={`text-xs rounded-full px-2 py-0.5 ${plan.active ? 'bg-green-600 text-white' : 'bg-muted text-muted-foreground'}`}>
+          {plan.active ? 'Activo' : 'Inactivo'}
+        </span>
+        <Switch checked={plan.active} onCheckedChange={() => onToggle(plan)} />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">Nombre</Label>
+        <Input value={name} onChange={(e) => setName(e.target.value)} />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <Label className="text-xs">Precio (CUP)</Label>
+          <Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Días</Label>
+          <Input type="number" value={days} onChange={(e) => setDays(e.target.value)} />
+        </div>
+      </div>
+      <Button
+        size="sm"
+        className="w-full"
+        onClick={() =>
+          onSave({ id: plan.id, name, price: Number(price), durationDays: Number(days) })
+        }
+      >
+        <Save className="h-4 w-4 mr-1" />Guardar precio
+      </Button>
+    </div>
+  )
+}
+
+function KpiCard({
+  icon: Icon,
+  label,
+  value,
+  sub,
+  tone = 'text-foreground',
+  onClick,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  value: number | string
+  sub?: string
+  tone?: string
+  onClick: () => void
+}) {
+  return (
+    <button onClick={onClick} className="group w-full text-left focus:outline-none">
+      <Card className="h-full transition-all group-hover:border-primary/40 group-hover:shadow-md">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Icon className="h-3 w-3" />
+              {label}
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+          </div>
+          <div className={`mt-1 text-3xl font-bold ${tone}`}>{value}</div>
+          {sub && <div className="mt-1 text-[11px] text-muted-foreground">{sub}</div>}
+        </CardContent>
+      </Card>
+    </button>
+  )
+}
+
+function BusinessDetailDialog({
+  business,
+  metrics,
+  onClose,
+  onVisit,
+  onPanel,
+}: {
+  business: AdminBusiness | null
+  metrics?: BusinessMetrics
+  onClose: () => void
+  onVisit: (slug: string) => void
+  onPanel: (slug: string) => void
+}) {
+  const licActive =
+    business?.license && business.license.active && new Date(business.license.endDate) > new Date()
+
+  return (
+    <Dialog open={Boolean(business)} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        {business && (
+          <>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                {business.name}
+                {business.license && (
+                  <Badge variant={licActive ? 'default' : 'destructive'}>
+                    {licActive ? 'ACTIVO' : 'EXPIRADO'}
+                  </Badge>
+                )}
+              </DialogTitle>
+              <DialogDescription>/{business.slug}</DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              {/* Información general */}
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <InfoRow label="Categoría" value={business.category.name} />
+                <InfoRow label="Dueño" value={`${business.owner.name} (@${business.owner.username})`} />
+                <InfoRow label="Creado" value={new Date(business.createdAt).toLocaleDateString('es-ES')} />
+                <InfoRow
+                  label="Servicios"
+                  value={String(business._count?.services ?? 0)}
+                />
+                {business.address && <InfoRow label="Dirección" value={business.address} span2 />}
+                {business.phone && <InfoRow label="Teléfono" value={business.phone} />}
+                {business.email && <InfoRow label="Email" value={business.email} />}
+                {business.description && <InfoRow label="Descripción" value={business.description} span2 />}
+              </div>
+
+              {/* Licencia */}
+              {business.license && (
+                <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+                  <p className="mb-2 font-medium">Licencia</p>
+                  <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+                    <InfoRow
+                      label="Inicio"
+                      value={new Date(business.license.startDate).toLocaleDateString('es-ES')}
+                    />
+                    <InfoRow
+                      label="Fin"
+                      value={new Date(business.license.endDate).toLocaleDateString('es-ES')}
+                    />
+                    <InfoRow label="Duración" value={`${business.license.durationDays} días`} />
+                    <InfoRow label="Estado" value={business.license.active ? 'Activa' : 'Inactiva'} />
+                  </div>
+                </div>
+              )}
+
+              {/* Métricas */}
+              <div className="rounded-lg border p-3">
+                <p className="mb-2 text-sm font-medium">Métricas</p>
+                {metrics ? (
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <MetricBox label="Visitas" value={metrics.visits} icon={Eye} />
+                    <MetricBox label="Citas" value={metrics.appointments} icon={CalIcon} />
+                    <MetricBox label="Completadas" value={metrics.completed} icon={CheckCircle2} tone="text-green-600" />
+                    <MetricBox label="Pendientes" value={metrics.pending} icon={Clock} tone="text-amber-600" />
+                    <MetricBox label="Confirmadas" value={metrics.confirmed} icon={CalendarCheck} tone="text-blue-600" />
+                    <MetricBox label="Canceladas" value={metrics.cancelled} icon={XCircle} tone="text-red-600" />
+                    <div className="col-span-3 rounded-md bg-primary/10 py-2">
+                      <div className="flex items-center justify-center gap-1 text-sm font-semibold text-primary">
+                        <Wallet className="h-4 w-4" />
+                        ${metrics.revenue.toLocaleString('es-ES')} en citas completadas
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="py-4 text-center text-sm text-muted-foreground">
+                    Sin métricas registradas todavía.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose}>Cerrar</Button>
+              <Button variant="outline" onClick={() => onVisit(business.slug)}>
+                Ver sitio público
+              </Button>
+              <Button onClick={() => onPanel(business.slug)}>Panel del dueño</Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function InfoRow({ label, value, span2 }: { label: string; value: string; span2?: boolean }) {
+  return (
+    <div className={span2 ? 'col-span-2' : ''}>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="font-medium">{value || '—'}</div>
+    </div>
+  )
+}
+
+function MetricBox({
+  label,
+  value,
+  icon: Icon,
+  tone = 'text-foreground',
+}: {
+  label: string
+  value: number
+  icon: React.ComponentType<{ className?: string }>
+  tone?: string
+}) {
+  return (
+    <div className="rounded-md border bg-card p-2">
+      <Icon className={`mx-auto h-3.5 w-3.5 ${tone}`} />
+      <div className={`text-lg font-bold ${tone}`}>{value}</div>
+      <div className="text-[10px] text-muted-foreground">{label}</div>
     </div>
   )
 }

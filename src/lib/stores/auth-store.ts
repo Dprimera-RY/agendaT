@@ -37,7 +37,8 @@ export const useAuth = create<AuthState>((set) => ({
   setLoading: (b) => set({ loading: b }),
   fetchMe: async () => {
     try {
-      const res = await fetch('/api/auth/me')
+      // Timeout: en móviles por red el fetch puede colgar; nunca dejar loading=true
+      const res = await fetch('/api/auth/me', { signal: AbortSignal.timeout(10000) })
       const data = await res.json()
       set({ session: data, loading: false })
     } catch {

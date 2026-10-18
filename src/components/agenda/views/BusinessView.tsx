@@ -14,8 +14,12 @@ import {
   MessageCircle,
   ChevronLeft,
   ChevronRight,
+  KeyRound,
+  Send,
+  Bell,
 } from 'lucide-react'
 import { useRouterStore } from '@/lib/stores/router-store'
+import { getGuestHash } from '@/lib/guest'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -23,6 +27,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { PushEnableButton } from '@/components/agenda/PushRegistrar'
 import { toast } from 'sonner'
 
 interface Business {
@@ -55,8 +60,31 @@ interface Slot {
   available: boolean
 }
 
+interface ReviewItem {
+  id: string
+  rating: number
+  customerName?: string | null
+  comment?: string | null
+  createdAt: string
+}
+
+interface ReviewsState {
+  reviews: ReviewItem[]
+  average: number | null
+  count: number
+  canReview: boolean
+  alreadyReviewed: boolean
+}
+
 const DAYS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
 const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+
+// Link wa.me con mensaje pre-cargado de saludo e interés (solo dígitos en el número)
+function whatsappContactLink(phone: string, businessName: string): string {
+  const digits = phone.replace(/\D/g, '')
+  const message = `¡Hola, ${businessName}! 👋 Estoy interesado(a) en sus servicios y me gustaría recibir más información. ¿Podrían ayudarme? ¡Gracias!`
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`
+}
 
 export function BusinessView({ slug }: { slug: string }) {
   const { navigate } = useRouterStore()
@@ -64,7 +92,7 @@ export function BusinessView({ slug }: { slug: string }) {
   const [loading, setLoading] = useState(true)
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null)
   const [bookingOpen, setBookingOpen] = useState(false)
-  const [selectedService, setSelectedService] = useState<string>('')
+  const [selectedServices, setSelectedServices] = useState<string[]>([])
   const [selectedDate, setSelectedDate] = useState<Date>(new Date())
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date())
   const [slots, setSlots] = useState<Slot[] | null>(null)
@@ -76,13 +104,18 @@ export function BusinessView({ slug }: { slug: string }) {
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [bookedSuccess, setBookedSuccess] = useState<{
-    whatsapp: { to: string; message: string }
+    whatsapp: { to: string | null; message: string; link: string | null }
     appointment: { date: string; service: string }
   } | null>(null)
+  const [reviewsState, setReviewsState] = useState<ReviewsState | null>(null)
+  const [reviewsRefresh, setReviewsRefresh] = useState(0)
+  const [reviewRating, setReviewRating] = useState(0)
+  const [reviewName, setReviewName] = useState('')
+  const [reviewComment, setReviewComment] = useState('')
+  const [submittingReview, setSubmittingReview] = useState(false)
 
   // Cargar negocio
   useEffect(() => {
-    setLoading(true)
     fetch(`/api/businesses/by-slug?slug=${encodeURIComponent(slug)}`)
       .then((r) => {
         if (!r.ok) throw new Error()
@@ -90,9 +123,12 @@ export function BusinessView({ slug }: { slug: string }) {
       })
       .then((data) => {
         setBusiness(data)
-        if (data.services.length > 0) {
-          setSelectedService(data.services[0].id)
-        }
+        // Registrar visita para métricas del admin (fire-and-forget)
+        fetch('/api/visits', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ businessId: data.id }),
+        }).catch(() => {})
       })
       .catch(() => {
         toast.error('Negocio no encontrado')
@@ -101,10 +137,42 @@ export function BusinessView({ slug }: { slug: string }) {
       .finally(() => setLoading(false))
   }, [slug, navigate])
 
+  // Cargar reseñas del negocio (y si el invitado puede / ya reseñó)
+  useEffect(() => {
+    if (!business) return
+    const hash = getGuestHash()
+    const params = new URLSearchParams({ businessId: business.id })
+    if (hash) params.set('customerHash', hash)
+    fetch(`/api/reviews?${params}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setReviewsState({
+          reviews: data.reviews || [],
+          average: data.average ?? null,
+          count: data.count || 0,
+          canReview: !!data.canReview,
+          alreadyReviewed: !!data.alreadyReviewed,
+        })
+      })
+      .catch(() => {})
+  }, [business, reviewsRefresh])
+
   // Verificar qué días están disponibles (por día de la semana)
   const availableDaysOfWeek = new Set(
     business?.availabilities.map((a) => a.dayOfWeek) || []
   )
+
+  // Duración total de los servicios seleccionados (para calcular slots y validar)
+  const totalDurationMin = (business?.services || [])
+    .filter((s) => selectedServices.includes(s.id))
+    .reduce((sum, s) => sum + s.durationMin, 0)
+
+  function toggleService(id: string) {
+    setSelectedServices((prev) =>
+      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]
+    )
+    setSelectedSlot(null)
+  }
 
   function isDayAvailable(date: Date): boolean {
     if (!business || business.availabilities.length === 0) return false
@@ -114,29 +182,40 @@ export function BusinessView({ slug }: { slug: string }) {
     return availableDaysOfWeek.has(date.getDay())
   }
 
-  // Cargar slots cuando cambia la fecha o servicio
+  // Cargar slots cuando cambia la fecha o la selección de servicios
   useEffect(() => {
     if (!business || !selectedDate) return
     setLoadingSlots(true)
     setSlots(null)
     setSelectedSlot(null)
+    // Sin servicios seleccionados no hay duración que calcular
+    if (totalDurationMin <= 0) {
+      setSlots([])
+      setLoadingSlots(false)
+      return
+    }
     const dateStr = selectedDate.toISOString().split('T')[0]
     const params = new URLSearchParams({
       businessId: business.id,
       date: dateStr,
+      durationMin: String(totalDurationMin),
     })
-    if (selectedService) params.set('serviceId', selectedService)
     fetch(`/api/slots?${params}`)
       .then((r) => r.json())
       .then((data) => setSlots(data.slots || []))
       .catch(() => toast.error('Error al cargar slots'))
       .finally(() => setLoadingSlots(false))
-  }, [business, selectedDate, selectedService])
+  }, [business, selectedDate, totalDurationMin])
 
   const handleBook = async () => {
-    if (!business || !selectedSlot || !selectedService) return
+    if (!business || !selectedSlot || selectedServices.length === 0) return
     if (!customerName || !customerPhone) {
       toast.error('Nombre y teléfono son obligatorios')
+      return
+    }
+    const phoneDigits = customerPhone.replace(/\D/g, '')
+    if (phoneDigits.length < 8) {
+      toast.error('Introduce un número de teléfono válido (sin el prefijo +53)')
       return
     }
     setSubmitting(true)
@@ -149,23 +228,30 @@ export function BusinessView({ slug }: { slug: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           businessId: business.id,
-          serviceId: selectedService,
+          serviceIds: selectedServices,
           customerName,
-          customerPhone,
+          customerPhone: `+53${phoneDigits}`,
           customerEmail,
+          customerHash: getGuestHash(),
           date: date.toISOString(),
           notes,
         }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Error')
+      const serviceNames = business.services
+        .filter((s) => selectedServices.includes(s.id))
+        .map((s) => s.name)
+        .join(' + ')
       setBookedSuccess({
         whatsapp: data.whatsappNotification,
         appointment: {
           date: date.toISOString(),
-          service: data.service?.name || '',
+          service: serviceNames,
         },
       })
+      // Con cita nueva el invitado puede pasar a reseñar
+      setReviewsRefresh((n) => n + 1)
       // Recargar slots
       setSlots((prev) =>
         prev?.map((s) => (s.start === selectedSlot.start ? { ...s, available: false } : s)) || null
@@ -179,7 +265,34 @@ export function BusinessView({ slug }: { slug: string }) {
     }
   }
 
-  const selectedServiceObj = business?.services.find((s) => s.id === selectedService)
+  const handleReview = async () => {
+    if (!business || !reviewRating) return
+    setSubmittingReview(true)
+    try {
+      const res = await fetch('/api/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          businessId: business.id,
+          customerHash: getGuestHash(),
+          customerName: reviewName,
+          rating: reviewRating,
+          comment: reviewComment,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Error')
+      toast.success('¡Gracias por tu reseña!')
+      setReviewName('')
+      setReviewComment('')
+      setReviewRating(0)
+      setReviewsRefresh((n) => n + 1)
+    } catch (e: any) {
+      toast.error(e.message || 'Error al enviar la reseña')
+    } finally {
+      setSubmittingReview(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -223,10 +336,18 @@ export function BusinessView({ slug }: { slug: string }) {
                 <Badge variant="secondary" className="mb-2">{business.category.name}</Badge>
                 <h1 className="text-3xl md:text-4xl font-bold tracking-tight">{business.name}</h1>
               </div>
-              <div className="flex items-center gap-1 text-amber-500">
-                <Star className="h-4 w-4 fill-current" />
-                <span className="text-sm font-medium">4.9</span>
-              </div>
+              {reviewsState && reviewsState.count > 0 ? (
+                <div className="flex items-center gap-1 text-amber-500">
+                  <Star className="h-4 w-4 fill-current" />
+                  <span className="text-sm font-medium">{reviewsState.average}</span>
+                  <span className="text-xs text-muted-foreground">({reviewsState.count})</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 text-muted-foreground">
+                  <Star className="h-4 w-4" />
+                  <span className="text-xs">Sin reseñas</span>
+                </div>
+              )}
             </div>
             {business.description && (
               <p className="text-muted-foreground">{business.description}</p>
@@ -257,15 +378,34 @@ export function BusinessView({ slug }: { slug: string }) {
                 </div>
               )}
             </div>
-            <Button
-              size="lg"
-              className="mt-2 w-full md:w-auto"
-              onClick={() => setBookingOpen(true)}
-              disabled={business.services.length === 0}
-            >
-              <CalendarCheck className="h-5 w-5 mr-2" />
-              {business.services.length === 0 ? 'Sin servicios' : 'Agendar cita'}
-            </Button>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 mt-2">
+              <Button
+                size="lg"
+                className="w-full sm:w-auto"
+                onClick={() => setBookingOpen(true)}
+                disabled={business.services.length === 0}
+              >
+                <CalendarCheck className="h-5 w-5 mr-2" />
+                {business.services.length === 0 ? 'Sin servicios' : 'Agendar cita'}
+              </Button>
+              {business.phone && (
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="w-full sm:w-auto border-green-600/40 text-green-700 hover:bg-green-50 hover:text-green-800"
+                  asChild
+                >
+                  <a
+                    href={whatsappContactLink(business.phone, business.name)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <MessageCircle className="h-5 w-5 mr-2" />
+                    WhatsApp
+                  </a>
+                </Button>
+              )}
+            </div>
             {business.services.length === 0 && (
               <p className="text-xs text-muted-foreground">
                 Este negocio aún no tiene servicios configurados.
@@ -323,7 +463,7 @@ export function BusinessView({ slug }: { slug: string }) {
                     variant="outline"
                     className="mt-1"
                     onClick={() => {
-                      setSelectedService(s.id)
+                      setSelectedServices([s.id])
                       setBookingOpen(true)
                     }}
                   >
@@ -334,6 +474,124 @@ export function BusinessView({ slug }: { slug: string }) {
             </Card>
           ))}
         </div>
+      </section>
+
+      {/* RESEÑAS Y VALORACIONES */}
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-2xl font-semibold">Reseñas y valoraciones</h2>
+          <p className="text-sm text-muted-foreground">
+            {reviewsState && reviewsState.count > 0
+              ? `${reviewsState.count} reseña${reviewsState.count === 1 ? '' : 's'} · ${reviewsState.average} de promedio`
+              : 'Aún no hay reseñas para este negocio'}
+          </p>
+        </div>
+
+        {/* Formulario: solo si tiene cita previa y aún no reseñó */}
+        {reviewsState?.canReview && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Deja tu valoración</CardTitle>
+              <CardDescription>
+                Solo clientes con una cita en este negocio pueden reseñar, una única vez.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="rn">Tu nombre (opcional)</Label>
+                <Input
+                  id="rn"
+                  value={reviewName}
+                  onChange={(e) => setReviewName(e.target.value)}
+                  placeholder="Cómo quieres que te identifiquen"
+                  maxLength={60}
+                />
+              </div>
+              <div className="flex items-center gap-1">
+                {[1, 2, 3, 4, 5].map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setReviewRating(v)}
+                    aria-label={`${v} estrella${v === 1 ? '' : 's'}`}
+                    className="p-0.5 transition-transform hover:scale-110"
+                  >
+                    <Star
+                      className={`h-7 w-7 ${
+                        v <= reviewRating
+                          ? 'fill-amber-400 text-amber-400'
+                          : 'text-muted-foreground/40'
+                      }`}
+                    />
+                  </button>
+                ))}
+                {reviewRating > 0 && (
+                  <span className="ml-2 text-sm text-muted-foreground">{reviewRating}/5</span>
+                )}
+              </div>
+              <Textarea
+                value={reviewComment}
+                onChange={(e) => setReviewComment(e.target.value)}
+                placeholder="Cuéntanos cómo fue tu experiencia (opcional)"
+                rows={3}
+              />
+              <Button onClick={handleReview} disabled={!reviewRating || submittingReview}>
+                <Send className="h-4 w-4 mr-2" />
+                {submittingReview ? 'Enviando...' : 'Enviar reseña'}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {reviewsState?.alreadyReviewed && (
+          <div className="rounded-lg bg-primary/5 border border-primary/20 p-4 text-sm text-muted-foreground flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-primary" />
+            Ya dejaste tu reseña en este negocio. ¡Gracias por tu opinión!
+          </div>
+        )}
+
+        {/* Listado de reseñas */}
+        {reviewsState && reviewsState.reviews.length > 0 && (
+          <div className="space-y-3">
+            {reviewsState.reviews.map((r) => (
+              <Card key={r.id}>
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">
+                        {r.customerName || 'Cliente'}
+                      </span>
+                      <div className="flex items-center gap-0.5">
+                        {[1, 2, 3, 4, 5].map((v) => (
+                          <Star
+                            key={v}
+                            className={`h-3.5 w-3.5 ${
+                              v <= r.rating ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground/30'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(r.createdAt).toLocaleDateString('es-ES', {
+                        dateStyle: 'medium',
+                      })}
+                    </span>
+                  </div>
+                  {r.comment && (
+                    <p className="text-sm text-muted-foreground">{r.comment}</p>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+
+        {!reviewsState?.canReview && !reviewsState?.alreadyReviewed && (
+          <p className="text-sm text-muted-foreground">
+            ¿Ya agendaste aquí? Deja tu valoración tras tu visita y ayúdale a otros clientes a decidir.
+          </p>
+        )}
       </section>
 
       {/* MODAL de booking */}
@@ -383,14 +641,55 @@ export function BusinessView({ slug }: { slug: string }) {
               <div className="rounded-lg bg-green-50 border border-green-200 p-4 space-y-2">
                 <div className="flex items-center gap-2 text-green-700 font-medium text-sm">
                   <MessageCircle className="h-4 w-4" />
-                  Notificación WhatsApp enviada al dueño
+                  Avisa al dueño por WhatsApp
                 </div>
                 <pre className="text-xs whitespace-pre-wrap font-mono bg-white/50 rounded p-3 border border-green-100">
 {bookedSuccess.whatsapp.message}
                 </pre>
+                {bookedSuccess.whatsapp.link ? (
+                  <Button
+                    size="sm"
+                    className="w-full bg-green-600 hover:bg-green-700"
+                    onClick={() => window.open(bookedSuccess.whatsapp.link!, '_blank')}
+                  >
+                    <MessageCircle className="h-4 w-4 mr-1" />
+                    Enviar al dueño ({bookedSuccess.whatsapp.to})
+                  </Button>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    El negocio no tiene WhatsApp configurado. Guarda tu código de seguimiento.
+                  </p>
+                )}
+              </div>
+
+              <div className="rounded-lg border p-4 space-y-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="text-sm font-medium flex items-center gap-2">
+                    <Bell className="h-4 w-4" />
+                    Notificaciones de tu cita
+                  </div>
+                  <PushEnableButton
+                    target={{ targetType: 'customer', targetId: getGuestHash() }}
+                    size="sm"
+                  />
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  Para: <strong>{bookedSuccess.whatsapp.to}</strong> (simulado)
+                  Actívalas para saber en tu móvil cuando el dueño confirme, reprograme o cancele
+                  tu cita.
                 </p>
+              </div>
+
+              <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 space-y-2">
+                <div className="flex items-center gap-2 text-amber-700 font-medium text-sm">
+                  <KeyRound className="h-4 w-4" />
+                  Tu código de seguimiento
+                </div>
+                <p className="text-xs text-amber-700/80">
+                  Guárdalo para ver o cancelar tus citas desde cualquier dispositivo.
+                </p>
+                <code className="block text-xs font-mono bg-white/60 rounded p-2 border border-amber-200 break-all">
+                  {getGuestHash()}
+                </code>
               </div>
 
               <DialogFooter className="gap-2">
@@ -400,9 +699,17 @@ export function BusinessView({ slug }: { slug: string }) {
                 }}>
                   Cerrar
                 </Button>
+                <Button variant="outline" onClick={() => {
+                  setBookingOpen(false)
+                  setBookedSuccess(null)
+                  navigate('/mis-citas')
+                }}>
+                  Ver mis citas
+                </Button>
                 <Button onClick={() => {
                   setBookedSuccess(null)
                   setSelectedSlot(null)
+                  setSelectedServices([])
                 }}>
                   Agendar otra cita
                 </Button>
@@ -410,28 +717,55 @@ export function BusinessView({ slug }: { slug: string }) {
             </div>
           ) : (
             <div className="space-y-4">
-              {/* Servicio */}
+              {/* Servicios (multi-selección) */}
               <div className="space-y-2">
-                <Label>Servicio</Label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {business.services.map((s) => (
-                    <button
-                      key={s.id}
-                      onClick={() => setSelectedService(s.id)}
-                      className={`text-left p-3 rounded-lg border-2 transition-colors ${
-                        selectedService === s.id
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-primary/50'
-                      }`}
-                    >
-                      <div className="font-medium text-sm">{s.name}</div>
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="text-xs text-muted-foreground">{s.durationMin} min</span>
-                        <span className="font-bold text-primary">${s.price}</span>
-                      </div>
-                    </button>
-                  ))}
+                <div className="flex items-center justify-between">
+                  <Label>Servicios (puedes elegir varios)</Label>
+                  {totalDurationMin > 0 && (
+                    <span className="text-xs text-muted-foreground">
+                      Total: {totalDurationMin} min · $
+                      {business.services
+                        .filter((s) => selectedServices.includes(s.id))
+                        .reduce((sum, s) => sum + s.price, 0)}
+                    </span>
+                  )}
                 </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {business.services.map((s) => {
+                    const isSelected = selectedServices.includes(s.id)
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={() => toggleService(s.id)}
+                        className={`text-left p-3 rounded-lg border-2 transition-colors flex items-start justify-between gap-2 ${
+                          isSelected
+                            ? 'border-primary bg-primary/5'
+                            : 'border-border hover:border-primary/50'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="font-medium text-sm">{s.name}</div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs text-muted-foreground">{s.durationMin} min</span>
+                            <span className="font-bold text-primary text-xs">${s.price}</span>
+                          </div>
+                        </div>
+                        <CheckCircle2
+                          className={`h-5 w-5 shrink-0 mt-0.5 ${
+                            isSelected ? 'text-primary' : 'text-muted-foreground/30'
+                          }`}
+                        />
+                      </button>
+                    )
+                  })}
+                </div>
+                {totalDurationMin > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Los servicios se agendarán uno tras otro. Deben caber en el horario del negocio.
+                  </p>
+                )}
               </div>
 
               {/* Calendario */}
@@ -537,7 +871,22 @@ export function BusinessView({ slug }: { slug: string }) {
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="cp">Teléfono / WhatsApp *</Label>
-                      <Input id="cp" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="+53..." />
+                      <div className="flex">
+                        <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-input bg-muted text-sm text-muted-foreground font-medium">
+                          +53
+                        </span>
+                        <Input
+                          id="cp"
+                          value={customerPhone}
+                          onChange={(e) => setCustomerPhone(e.target.value)}
+                          placeholder="5 123 4567"
+                          inputMode="tel"
+                          className="rounded-l-none"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Prefijo de Cuba fijo. Introduce solo tu número.
+                      </p>
                     </div>
                   </div>
                   <div className="space-y-1.5">
@@ -558,7 +907,7 @@ export function BusinessView({ slug }: { slug: string }) {
               <Button variant="outline" onClick={() => setBookingOpen(false)}>Cancelar</Button>
               <Button
                 onClick={handleBook}
-                disabled={!selectedSlot || !selectedService || !customerName || !customerPhone || submitting}
+                disabled={!selectedSlot || selectedServices.length === 0 || !customerName || !customerPhone || submitting}
               >
                 {submitting ? 'Agendando...' : 'Confirmar cita'}
               </Button>

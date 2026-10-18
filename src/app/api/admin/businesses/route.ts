@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSession } from '@/lib/auth'
+import { isValidProvince } from '@/lib/provinces'
 
 // Listar todos los negocios (admin)
 export async function GET() {
@@ -33,6 +34,7 @@ export async function POST(req: NextRequest) {
       slug,
       description,
       address,
+      province,
       phone,
       email,
       ownerId,
@@ -45,6 +47,9 @@ export async function POST(req: NextRequest) {
         { error: 'Faltan campos obligatorios' },
         { status: 400 }
       )
+    }
+    if (province !== undefined && province !== null && province !== '' && !isValidProvince(province)) {
+      return NextResponse.json({ error: 'Provincia inválida' }, { status: 400 })
     }
     const existing = await db.business.findUnique({ where: { slug } })
     if (existing) {
@@ -60,6 +65,7 @@ export async function POST(req: NextRequest) {
         slug,
         description,
         address,
+        province: province || null,
         phone,
         email,
         ownerId,

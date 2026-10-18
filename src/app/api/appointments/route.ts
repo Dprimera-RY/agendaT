@@ -1,23 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
+import { dayOfWeek } from '@/lib/datetime'
+import { waLink, msgNewAppointment } from '@/lib/whatsapp'
+import { pushToOwner } from '@/lib/push'
 
-// Crear una nueva cita (endpoint público, lo usa cualquier cliente)
+// Crear nuevas citas (endpoint público, lo usa cualquier cliente).
+// Acepta serviceIds: string[] (multi-servicio, citas encadenadas) o serviceId (legacy, una sola cita).
 // Esta ruta SIMULA el envío de WhatsApp al dueño con el mensaje generado.
 export async function POST(req: NextRequest) {
   try {
     const {
       businessId,
       serviceId,
+      serviceIds,
       customerName,
       customerPhone,
       customerEmail,
+      customerHash, // hash anónimo del cliente (localStorage) para "mis citas"
       date, // ISO string
       notes,
+      byOwner, // true cuando el dueño agenda desde su panel (no simular WhatsApp)
     } = await req.json()
 
-    if (!businessId || !serviceId || !customerName || !customerPhone || !date) {
+    if (!businessId || !customerName || !customerPhone || !date) {
       return NextResponse.json(
         { error: 'Faltan campos obligatorios' },
+        { status: 400 }
+      )
+    }
+
+    // Normalizar lista de servicios (multi) o único (legacy)
+    const ids: string[] = Array.isArray(serviceIds) && serviceIds.length > 0
+      ? serviceIds.filter((s: unknown) => typeof s === 'string' && s)
+      : serviceId
+      ? [serviceId]
+      : []
+    if (ids.length === 0) {
+      return NextResponse.json(
+        { error: 'Debes seleccionar al menos un servicio' },
         { status: 400 }
       )
     }
@@ -40,32 +61,84 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Verificar que el slot esté disponible
-    const service = await db.service.findUnique({ where: { id: serviceId } })
-    if (!service || service.businessId !== businessId) {
+    // Verificar que todos los servicios pertenezcan al negocio y estén activos
+    const services = await db.service.findMany({
+      where: { id: { in: ids }, businessId, active: true },
+    })
+    if (services.length !== ids.length) {
       return NextResponse.json({ error: 'Servicio inválido' }, { status: 400 })
     }
+    // Ordenar según el orden elegido por el cliente
+    const orderedServices = ids.map((id) => services.find((s) => s.id === id)!)
+    const totalDurationMin = orderedServices.reduce((sum, s) => sum + s.durationMin, 0)
 
-    const appointmentDate = new Date(date)
+    const appointmentStart = new Date(date)
     const appointmentEnd = new Date(
-      appointmentDate.getTime() + service.durationMin * 60 * 1000
+      appointmentStart.getTime() + totalDurationMin * 60 * 1000
     )
 
-    // Verificar conflictos
+    // Validar que el rango completo quepa en el horario de disponibilidad del día
+    const dow = dayOfWeek(appointmentStart)
+    const availabilities = await db.availability.findMany({
+      where: { businessId, dayOfWeek: dow, active: true },
+    })
+    if (availabilities.length === 0) {
+      return NextResponse.json(
+        { error: 'El negocio no tiene disponibilidad este día' },
+        { status: 400 }
+      )
+    }
+    const fitsAvailability = availabilities.some((a) => {
+      const [sh, sm] = a.startTime.split(':').map(Number)
+      const [eh, em] = a.endTime.split(':').map(Number)
+      const dayStart = new Date(appointmentStart)
+      dayStart.setHours(sh, sm, 0, 0)
+      const dayEnd = new Date(appointmentStart)
+      dayEnd.setHours(eh, em, 0, 0)
+      return appointmentStart >= dayStart && appointmentEnd <= dayEnd
+    })
+    if (!fitsAvailability) {
+      return NextResponse.json(
+        { error: 'El horario seleccionado excede el tiempo disponible del negocio' },
+        { status: 400 }
+      )
+    }
+
+    // Horario de no atención (almuerzo) — solo aplica a reservas del público
+    if (!byOwner) {
+      const overlapsBreak = availabilities.some((a) => {
+        if (!a.breakStart || !a.breakEnd) return false
+        const [bsh, bsm] = a.breakStart.split(':').map(Number)
+        const [beh, bem] = a.breakEnd.split(':').map(Number)
+        const breakStart = new Date(appointmentStart)
+        breakStart.setHours(bsh, bsm, 0, 0)
+        const breakEnd = new Date(appointmentStart)
+        breakEnd.setHours(beh, bem, 0, 0)
+        return appointmentStart < breakEnd && appointmentEnd > breakStart
+      })
+      if (overlapsBreak) {
+        return NextResponse.json(
+          { error: 'Ese horario está dentro del tiempo de no atención (almuerzo)' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Verificar conflictos en el rango total contra otras citas
     const conflicts = await db.appointment.findMany({
       where: {
         businessId,
         status: { in: ['pendiente', 'confirmada'] },
         date: {
-          gte: new Date(appointmentDate.getFullYear(), appointmentDate.getMonth(), appointmentDate.getDate()),
-          lt: new Date(appointmentDate.getFullYear(), appointmentDate.getMonth(), appointmentDate.getDate() + 1),
+          gte: new Date(appointmentStart.getFullYear(), appointmentStart.getMonth(), appointmentStart.getDate()),
+          lt: new Date(appointmentStart.getFullYear(), appointmentStart.getMonth(), appointmentStart.getDate() + 1),
         },
       },
       include: { service: true },
     })
     const conflict = conflicts.some((c) => {
       const cEnd = new Date(c.date.getTime() + (c.service?.durationMin || 60) * 60 * 1000)
-      return appointmentDate < cEnd && appointmentEnd > c.date
+      return appointmentStart < cEnd && appointmentEnd > c.date
     })
     if (conflict) {
       return NextResponse.json(
@@ -74,56 +147,93 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const appointment = await db.appointment.create({
-      data: {
-        businessId,
-        serviceId,
+    const customerHashValid =
+      typeof customerHash === 'string' && /^[a-zA-Z0-9-]{20,64}$/.test(customerHash)
+        ? customerHash
+        : null
+
+    // Crear una cita por servicio, encadenadas una tras otra
+    let cursor = new Date(appointmentStart)
+    const created = await db.$transaction(async (tx) => {
+      const results: Prisma.AppointmentGetPayload<{ include: { service: true; business: true } }>[] = []
+      for (const service of orderedServices) {
+        results.push(
+          await tx.appointment.create({
+            data: {
+              businessId,
+              serviceId: service.id,
+              customerName,
+              customerPhone,
+              customerEmail,
+              customerHash: customerHashValid,
+              date: new Date(cursor),
+              status: 'pendiente',
+              notes,
+            },
+            include: { service: true, business: true },
+          })
+        )
+        cursor = new Date(cursor.getTime() + service.durationMin * 60 * 1000)
+      }
+      return results
+    })
+
+    // ===== NOTIFICACIÓN WHATSAPP AL DUEÑO (link real wa.me) + PUSH =====
+    // Si la cita la agendó el propio dueño (byOwner), no se notifica.
+    const ownerPhone = business.owner.phone || business.phone
+    let whatsappNotification: {
+      to: string | null
+      message: string
+      link: string | null
+      sent: boolean
+      simulated: boolean
+    } | null = null
+    if (!byOwner) {
+      const servicesList = orderedServices
+        .map((s) => `${s.name} ($${s.price}, ${s.durationMin} min)`)
+        .join(' + ')
+      const whatsappMessage = msgNewAppointment({
+        businessName: business.name,
         customerName,
         customerPhone,
-        customerEmail,
-        date: appointmentDate,
-        status: 'pendiente',
-        notes,
-      },
-      include: { service: true, business: true },
-    })
+        servicesList,
+        date: appointmentStart,
+        totalDurationMin,
+      })
+      const ownerLink = waLink(ownerPhone, whatsappMessage)
 
-    // ===== SIMULACIÓN DE NOTIFICACIÓN WHATSAPP AL DUEÑO =====
-    // Como no podemos enviar WhatsApp real, guardamos el mensaje que se enviaría
-    // en una "cola" simulada como nota en la cita. El dueño lo ve en su panel.
-    const ownerPhone = business.owner.phone || business.phone
-    const whatsappMessage = `🟢 *NUEVA CITA AGENDADA*
+      await db.appointment.updateMany({
+        where: { id: { in: created.map((a) => a.id) } },
+        data: {
+          notes: notes
+            ? `${notes}\n\n--- WhatsApp al dueño (${ownerPhone}) ---\n${whatsappMessage}`
+            : `--- WhatsApp al dueño (${ownerPhone}) ---\n${whatsappMessage}`,
+        },
+      })
 
-📋 Negocio: ${business.name}
-👤 Cliente: ${customerName}
-📞 Teléfono: ${customerPhone}
-💅 Servicio: ${service.name} ($${service.price})
-📅 Fecha: ${appointmentDate.toLocaleString('es-ES', { dateStyle: 'full', timeStyle: 'short' })}
-⏱️ Duración: ${service.durationMin} min
+      whatsappNotification = {
+        to: ownerPhone,
+        message: whatsappMessage,
+        link: ownerLink,
+        sent: true,
+        simulated: ownerLink === null,
+      }
 
-Para CONFIRMAR la cita, el cliente debe realizar el depósito.
-Una vez recibido el depósito, marca la cita como confirmada en tu panel.
-
-Responde a este mensaje o ingresa a tu panel de gestión para confirmar.`
-
-    await db.appointment.update({
-      where: { id: appointment.id },
-      data: {
-        notes: notes
-          ? `${notes}\n\n--- WhatsApp al dueño (${ownerPhone}) ---\n${whatsappMessage}`
-          : `--- WhatsApp al dueño (${ownerPhone}) ---\n${whatsappMessage}`,
-      },
-    })
+      // Push instantáneo al dueño (si activó notificaciones en su panel)
+      pushToOwner(business.ownerId, {
+        title: `Nueva cita — ${business.name}`,
+        body: `${customerName}: ${orderedServices.map((s) => s.name).join(' + ')} · ${appointmentStart.toLocaleString('es-ES', {
+          dateStyle: 'short',
+          timeStyle: 'short',
+        })}`,
+        url: `#/negocio/${business.slug}/panel`,
+      }).catch(() => {})
+    }
 
     return NextResponse.json(
       {
-        ...appointment,
-        whatsappNotification: {
-          to: ownerPhone,
-          message: whatsappMessage,
-          sent: true,
-          simulated: true,
-        },
+        appointments: created,
+        whatsappNotification,
       },
       { status: 201 }
     )
@@ -135,12 +245,27 @@ Responde a este mensaje o ingresa a tu panel de gestión para confirmar.`
   }
 }
 
-// Lista las citas de un negocio (público para dueño/admin vía session, o por businessId)
+// Lista las citas de un negocio (por businessId) o las citas de un cliente anónimo (por customerHash)
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const businessId = searchParams.get('businessId')
+  const customerHash = searchParams.get('customerHash')
   const from = searchParams.get('from')
   const to = searchParams.get('to')
+
+  // "Mis citas": el cliente anónimo consulta sus citas con su hash (localStorage)
+  if (customerHash && !businessId) {
+    if (!/^[a-zA-Z0-9-]{20,64}$/.test(customerHash)) {
+      return NextResponse.json({ error: 'customerHash inválido' }, { status: 400 })
+    }
+    const appointments = await db.appointment.findMany({
+      where: { customerHash },
+      include: { service: true, business: true },
+      orderBy: { date: 'desc' },
+      take: 100,
+    })
+    return NextResponse.json(appointments)
+  }
 
   if (!businessId) {
     return NextResponse.json(

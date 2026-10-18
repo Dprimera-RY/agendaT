@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSession } from '@/lib/auth'
+import { isValidProvince } from '@/lib/provinces'
 
 // Obtener todos los negocios del owner logueado
 export async function GET() {
@@ -43,6 +44,7 @@ export async function PATCH(req: NextRequest) {
       photo2,
       photo3,
       address,
+      province,
       phone,
       email,
     } = data
@@ -52,6 +54,9 @@ export async function PATCH(req: NextRequest) {
         { error: 'businessId es requerido' },
         { status: 400 }
       )
+    }
+    if (province !== undefined && province !== null && province !== '' && !isValidProvince(province)) {
+      return NextResponse.json({ error: 'Provincia inválida' }, { status: 400 })
     }
 
     const business = await db.business.findUnique({
@@ -74,6 +79,7 @@ export async function PATCH(req: NextRequest) {
         ...(photo2 !== undefined && { photo2 }),
         ...(photo3 !== undefined && { photo3 }),
         ...(address !== undefined && { address }),
+        ...(province !== undefined && { province: province || null }),
         ...(phone !== undefined && { phone }),
         ...(email !== undefined && { email }),
       },

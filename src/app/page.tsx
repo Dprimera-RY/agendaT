@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useAuth } from '@/lib/stores/auth-store'
 import { initRouter, matchRoute, useRouterStore } from '@/lib/stores/router-store'
 import { CatalogView } from '@/components/agenda/views/CatalogView'
@@ -10,15 +10,22 @@ import { AdminPanel } from '@/components/agenda/views/AdminPanel'
 import { LoginView } from '@/components/agenda/views/LoginView'
 import { RegisterView } from '@/components/agenda/views/RegisterView'
 import { CreateBusinessView } from '@/components/agenda/views/CreateBusinessView'
+import { MisCitasView } from '@/components/agenda/views/MisCitasView'
 import { AppShell } from '@/components/agenda/AppShell'
 
 export default function HomePage() {
   const { route } = useRouterStore()
   const { fetchMe, loading } = useAuth()
+  // El overlay de carga NUNCA se renderiza en el HTML del servidor:
+  // si el JS falla o tarda, el usuario ve el contenido (no un spinner eterno).
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
+    // setTimeout: montaje diferido (evita setState síncrono en el effect)
+    const t = setTimeout(() => setMounted(true), 0)
     initRouter()
     fetchMe()
+    return () => clearTimeout(t)
   }, [fetchMe])
 
   const matched = matchRoute(route.path)
@@ -38,13 +45,15 @@ export default function HomePage() {
     content = <RegisterView />
   } else if (matched.name === 'create-business') {
     content = <CreateBusinessView />
+  } else if (matched.name === 'mis-citas') {
+    content = <MisCitasView />
   } else {
     content = <CatalogView />
   }
 
   return (
     <AppShell>
-      {loading && (
+      {mounted && loading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
         </div>

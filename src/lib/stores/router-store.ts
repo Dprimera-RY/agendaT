@@ -68,6 +68,7 @@ export function matchRoute(path: string): {
     | 'login'
     | 'register'
     | 'create-business'
+    | 'mis-citas'
   slug?: string
 } {
   if (path === '/' || path === '') return { name: 'catalog' }
@@ -75,6 +76,7 @@ export function matchRoute(path: string): {
   if (path === '/login') return { name: 'login' }
   if (path === '/register') return { name: 'register' }
   if (path === '/crear-negocio') return { name: 'create-business' }
+  if (path === '/mis-citas') return { name: 'mis-citas' }
   const bizMatch = path.match(/^\/negocio\/([^/]+)$/)
   if (bizMatch) return { name: 'business', slug: bizMatch[1] }
   const panelMatch = path.match(/^\/negocio\/([^/]+)\/panel$/)

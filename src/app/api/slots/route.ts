@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
   const businessId = searchParams.get('businessId')
   const dateStr = searchParams.get('date')
   const serviceId = searchParams.get('serviceId')
+  const durationParam = Number(searchParams.get('durationMin'))
 
   if (!businessId || !dateStr) {
     return NextResponse.json(
@@ -45,8 +46,11 @@ export async function GET(req: NextRequest) {
   }
 
   const avail = business.availabilities[0]
+  // durationMin (multi-servicio) tiene prioridad sobre la duración del serviceId
   let durationMin = 30
-  if (serviceId) {
+  if (Number.isFinite(durationParam) && durationParam > 0) {
+    durationMin = Math.min(durationParam, 24 * 60)
+  } else if (serviceId) {
     const service = business.services.find((s) => s.id === serviceId)
     if (service) durationMin = service.durationMin
   }
@@ -76,6 +80,18 @@ export async function GET(req: NextRequest) {
   const dayEnd = new Date(date)
   dayEnd.setHours(eh, em, 0, 0)
 
+  // Horario de no atención (almuerzo), opcional
+  let breakStart: Date | null = null
+  let breakEnd: Date | null = null
+  if (avail.breakStart && avail.breakEnd) {
+    const [bsh, bsm] = avail.breakStart.split(':').map(Number)
+    const [beh, bem] = avail.breakEnd.split(':').map(Number)
+    breakStart = new Date(date)
+    breakStart.setHours(bsh, bsm, 0, 0)
+    breakEnd = new Date(date)
+    breakEnd.setHours(beh, bem, 0, 0)
+  }
+
   const now = new Date()
   const isToday = date.toDateString() === now.toDateString()
 
@@ -86,6 +102,12 @@ export async function GET(req: NextRequest) {
     if (slotEnd > dayEnd) break
 
     if (isToday && cursor < now) {
+      cursor = new Date(slotEnd)
+      continue
+    }
+
+    // Excluir slots dentro del horario de no atención (almuerzo)
+    if (breakStart && breakEnd && cursor < breakEnd && slotEnd > breakStart) {
       cursor = new Date(slotEnd)
       continue
     }

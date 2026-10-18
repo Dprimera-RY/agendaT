@@ -60,6 +60,7 @@ model Business {
   photo2    String?  // foto de trabajo 2
   photo3    String?  // foto de trabajo 3
   address   String?
+  province  String?  // Provincia de Cuba (select; incluye Isla de la Juventud)
   phone     String?
   email     String?
   ownerId   String
@@ -73,6 +74,9 @@ model Business {
   services     Service[]
   appointments Appointment[]
   availabilities Availability[]
+  visits       Visit[]
+  reviews      Review[]
+  paymentCodes PaymentCode[]
 }
 
 model License {
@@ -100,11 +104,65 @@ model Service {
   description String?
   price       Float
   durationMin Int      @default(30) // duración en minutos
+  color       String?  // color hex (#rrggbb) para el calendario del dueño
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
 
   business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
   appointments Appointment[]
+}
+
+// Configuración global de la app (clave-valor). Editable solo por el admin.
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// Planes/suscripciones ofrecidos (precios editables desde el admin)
+model Plan {
+  id           String   @id @default(cuid())
+  name         String   // "Mensual", "Anual", ...
+  durationDays Int      // duración de la suscripción en días
+  price        Int      // precio en CUP
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// Código de pago de 6 dígitos que genera el dueño al elegir un plan;
+// el asesor (admin) lo utiliza para aplicar el pago de la suscripción.
+model PaymentCode {
+  id           String   @id @default(cuid())
+  code         String   @unique // 6 dígitos
+  businessId   String
+  planId       String
+  planName     String   // nombre del plan al momento de generar (referencia)
+  price        Int      // precio en CUP al momento de generar
+  durationDays Int
+  status       String   @default("pendiente") // pendiente | pagada | rechazada
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([status])
+}
+
+// Suscripción Web Push (service worker). targetType: owner | customer
+model PushSubscription {
+  id         String   @id @default(cuid())
+  endpoint   String   @unique
+  p256dh     String
+  auth       String
+  targetType String   // "owner" | "customer"
+  targetId   String   // ownerId o customerHash
+  businessId String?  // opcional: filtro por negocio
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([targetType, targetId])
 }
 
 model Appointment {
@@ -114,6 +172,7 @@ model Appointment {
   customerName String
   customerPhone String  // WhatsApp del cliente
   customerEmail String?
+  customerHash String?  // hash anónimo del cliente (localStorage) para "mis citas"
   date        DateTime // fecha y hora exacta
   status      String   @default("pendiente") // pendiente | confirmada | cancelada | completada
   notes       String?
@@ -123,7 +182,25 @@ model Appointment {
   updatedAt   DateTime @updatedAt
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  service  Service  @relation(fields: [serviceId], references: [id])
+  service  Service @relation(fields: [serviceId], references: [id])
+
+  @@index([customerHash])
+}
+
+// Reseña anónima: una por (negocio, hash de cliente). Sin registro de usuario.
+model Review {
+  id           String   @id @default(cuid())
+  businessId   String
+  customerHash String
+  customerName String?  // nombre que decidió mostrar el cliente
+  rating       Int      // 1..5
+  comment      String?
+  createdAt    DateTime @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, customerHash])
+  @@index([businessId])
 }
 
 // ============================================================
@@ -136,6 +213,8 @@ model Availability {
   dayOfWeek   Int      // 0=Dom, 1=Lun, ..., 6=Sab
   startTime   String   // "09:00"
   endTime     String   // "17:00"
+  breakStart  String?  // inicio del horario de no atención (almuerzo), opcional "12:00"
+  breakEnd    String?  // fin del horario de no atención "13:00"
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
 
@@ -150,4 +229,15 @@ model TimeBlock {
   endDate     DateTime
   reason      String?
   createdAt   DateTime @default(now())
+}
+
+// Visitas a la página pública de un negocio (para métricas del admin)
+model Visit {
+  id         String   @id @default(cuid())
+  businessId String
+  createdAt  DateTime @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, createdAt])
 }

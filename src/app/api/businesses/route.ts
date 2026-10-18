@@ -1,22 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { isValidProvince } from '@/lib/provinces'
 
-// Lista todos los negocios (con filtros por categoría y nombre)
+// Lista todos los negocios (con filtros por categoría, nombre y provincia)
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const categoryId = searchParams.get('categoryId')
   const q = searchParams.get('q')?.toLowerCase().trim()
+  const province = searchParams.get('province')
 
   const where: {
     categoryId?: string
-    OR?: Array<{ name?: { contains: string }; description?: { contains: string } }>
+    province?: string
+    OR?: Array<{
+      name?: { contains: string }
+      description?: { contains: string }
+      services?: { some: { name: { contains: string } } }
+    }>
   } = {}
 
   if (categoryId) where.categoryId = categoryId
+  if (province && isValidProvince(province)) where.province = province
   if (q) {
     where.OR = [
       { name: { contains: q } },
       { description: { contains: q } },
+      // La búsqueda también debe encontrar negocios por el nombre de sus servicios
+      { services: { some: { name: { contains: q } } } },
     ]
   }
 
@@ -60,6 +70,7 @@ export async function POST(req: NextRequest) {
       photo2,
       photo3,
       address,
+      province,
       phone,
       email,
       ownerId,
@@ -72,6 +83,9 @@ export async function POST(req: NextRequest) {
         { error: 'Faltan campos obligatorios' },
         { status: 400 }
       )
+    }
+    if (province !== undefined && province !== null && province !== '' && !isValidProvince(province)) {
+      return NextResponse.json({ error: 'Provincia inválida' }, { status: 400 })
     }
 
     // Verificar que el slug no exista
@@ -93,6 +107,7 @@ export async function POST(req: NextRequest) {
         photo2,
         photo3,
         address,
+        province: province || null,
         phone,
         email,
         ownerId,

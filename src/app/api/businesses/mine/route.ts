@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSession } from '@/lib/auth'
+import { isValidProvince } from '@/lib/provinces'
 
 // Permite a un dueño autenticado crear su primer (o siguiente) negocio
 export async function POST(req: NextRequest) {
@@ -16,6 +17,7 @@ export async function POST(req: NextRequest) {
       slug,
       description,
       address,
+      province,
       phone,
       email,
       categoryId,
@@ -30,6 +32,9 @@ export async function POST(req: NextRequest) {
         { error: 'Nombre, slug (URL) y categoría son obligatorios' },
         { status: 400 }
       )
+    }
+    if (province !== undefined && province !== null && province !== '' && !isValidProvince(province)) {
+      return NextResponse.json({ error: 'Provincia inválida' }, { status: 400 })
     }
 
     // Si es owner, usar su propio ID; si es admin, requerir ownerId
@@ -63,6 +68,7 @@ export async function POST(req: NextRequest) {
         slug,
         description,
         address,
+        province: province || null,
         phone,
         email,
         logo,

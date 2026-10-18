@@ -1,10 +1,11 @@
 'use client'
 
 import { type ReactNode } from 'react'
-import { Calendar } from 'lucide-react'
+import { Calendar, CalendarCheck } from 'lucide-react'
 import { useRouterStore } from '@/lib/stores/router-store'
 import { useAuth } from '@/lib/stores/auth-store'
 import { Button } from '@/components/ui/button'
+import { useServiceWorker } from '@/components/agenda/PushRegistrar'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +19,8 @@ import { Badge } from '@/components/ui/badge'
 export function AppShell({ children }: { children: ReactNode }) {
   const { navigate, route } = useRouterStore()
   const { session, logout } = useAuth()
+  // Registrar el service worker de notificaciones push (solo en el cliente)
+  useServiceWorker()
 
   const isOnAdmin = route.path.startsWith('/admin')
   const isOnPanel = route.path.includes('/panel')
@@ -44,14 +47,16 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
 
           <nav className="flex items-center gap-2">
-            <Button
-              variant={route.path === '/' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => navigate('/')}
-              className="hidden sm:flex"
-            >
-              Catálogo
-            </Button>
+            {!session.role && (
+              <Button
+                variant={route.path === '/mis-citas' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => navigate('/mis-citas')}
+              >
+                <CalendarCheck className="h-4 w-4 mr-1 sm:mr-1" />
+                <span className="hidden sm:inline">Mis citas</span>
+              </Button>
+            )}
 
             {session.role === 'owner' && (
               session.businesses && session.businesses.length > 0 ? (
@@ -155,7 +160,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <footer className="border-t border-border mt-auto bg-muted/30">
         <div className="container mx-auto px-4 py-6 flex flex-col sm:flex-row items-center justify-between gap-2 text-sm text-muted-foreground">
           <span>© {new Date().getFullYear()} AgendaPro — Plataforma de citas multi-negocio</span>
-          <span>Hecho con Next.js, Prisma & shadcn/ui</span>
+          <span>Desarrollado por <b>rycode</b> D'Primera RY</span>
         </div>
       </footer>
     </div>
