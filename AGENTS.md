@@ -23,6 +23,8 @@ bun run db:generate
 ```
 
 - Arranque completo del entorno: `bash .zscripts/dev.sh` (install → db:push → dev → health check en :3000).
+- **Acceso por LAN (otro PC/móvil)**: el dev server va con `-H 0.0.0.0` (`*:3000`), pero Next 16 bloquea con 403 el websocket de HMR (`/_next/hmr`) si el `Origin` no está en `allowedDevOrigins` (`next.config.ts`). Sin eso, desde `http://<ip-local>:3000` el WS falla (síntoma: errores de conexión en consola / overlay). El matcher compara **hostname sin protocolo ni puerto** (ej. `"192.168.*.*"`, no `"http://192.168.1.103:3000"`). Si la IP de la máquina cambia de subred, actualizar la lista.
+- **La `DATABASE_URL` de `.env` es relativa** (`file:../db/custom.db`, resuelta contra `prisma/` como hace el CLI). `src/lib/db.ts` la normaliza a absoluta contra `prisma/` del CWD para que el runtime (dev, standalone y otras máquinas) use siempre `<raíz>/db/custom.db`. No cambiarla a ruta absoluta de esta máquina: rompe en otros equipos.
 - **No hay script de typecheck ni framework de tests.** `next.config.ts` tiene `typescript.ignoreBuildErrors: true`; `tsc --noEmit` da **0 errores en `src/`** (excluye `examples/` con `grep -v '^examples/'`); no agregues más.
 - `bun run lint` **ya falla hoy** con 3 errores `react-hooks/set-state-in-effect` en `views/BusinessView.tsx`, `ui/carousel.tsx` y `hooks/use-mobile.ts`. No son regresión de tus cambios; verifica solo que no aumenten.
 - `tests/*.sh` son harnesses bash de los scripts de deploy (usan un `bun` falso): `bash tests/database-runtime-build.sh`.

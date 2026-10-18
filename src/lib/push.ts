@@ -39,7 +39,7 @@ async function ensureVapidConfigured(): Promise<{ publicKey: string; privateKey:
   }
 
   if (!pub || !priv) return null
-  webpush.setVapidDetails('mailto:soporte@agendapro.app', pub, priv)
+  webpush.setVapidDetails('mailto:soporte@agendat.app', pub, priv)
   return { publicKey: pub, privateKey: priv }
 }
 

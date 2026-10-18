@@ -1,6 +1,6 @@
-// Service Worker de AgendaPro — notificaciones push
+// Service Worker de AgendaT — notificaciones push
 self.addEventListener('push', (event) => {
-  let data = { title: 'AgendaPro', body: 'Tienes una notificación', url: '#/' }
+  let data = { title: 'AgendaT', body: 'Tienes una notificación', url: '#/' }
   try {
     if (event.data) {
       data = Object.assign(data, event.data.json())
@@ -18,7 +18,7 @@ self.addEventListener('push', (event) => {
     data: { url: data.url || '#/' },
     vibrate: [100, 50, 100],
   }
-  event.waitUntil(self.registration.showNotification(data.title || 'AgendaPro', options))
+  event.waitUntil(self.registration.showNotification(data.title || 'AgendaT', options))
 })
 
 self.addEventListener('notificationclick', (event) => {

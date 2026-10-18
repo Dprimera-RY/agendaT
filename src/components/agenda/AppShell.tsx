@@ -33,12 +33,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             onClick={() => navigate('/')}
             className="flex items-center gap-2 group cursor-pointer"
           >
-            <div className="h-9 w-9 rounded-xl bg-primary flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform">
-              <Calendar className="h-5 w-5 text-primary-foreground" />
-            </div>
+            <img src={"/logo.png"} width={"50px"} />
             <div className="flex flex-col items-start">
               <span className="font-bold text-lg leading-none tracking-tight">
-                AgendaPro
+                AgendaT
               </span>
               <span className="text-[10px] text-muted-foreground leading-none mt-0.5">
                 Citas Multi-Negocio
@@ -159,7 +157,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <footer className="border-t border-border mt-auto bg-muted/30">
         <div className="container mx-auto px-4 py-6 flex flex-col sm:flex-row items-center justify-between gap-2 text-sm text-muted-foreground">
-          <span>© {new Date().getFullYear()} AgendaPro — Plataforma de citas multi-negocio</span>
+          <span>© {new Date().getFullYear()} AgendaT — Plataforma de citas multi-negocio</span>
           <span>Desarrollado por <b>rycode</b> D'Primera RY</span>
         </div>
       </footer>

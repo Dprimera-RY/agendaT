@@ -15,12 +15,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AgendaPro — Citas Multi-Negocio",
+  title: "AgendaT — Citas Multi-Negocio",
   description: "Plataforma de gestión de citas para múltiples negocios. Reserva, gestiona disponibilidad y controla tu agenda en un solo lugar.",
   keywords: ["citas", "agenda", "reservas", "negocios", "multi-negocio"],
-  authors: [{ name: "AgendaPro" }],
+  authors: [{ name: "AgendaT" }],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "./logo.png",
   },
 };
 

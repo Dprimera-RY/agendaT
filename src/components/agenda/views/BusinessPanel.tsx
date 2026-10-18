@@ -155,7 +155,7 @@ function dayKey(d: Date) {
 
 function waSoporteLink(phone: string, businessName: string) {
   const digits = phone.replace(/[^0-9]/g, '')
-  const text = `Hola, soy el dueño de ${businessName} y necesito ayuda con AgendaPro.`
+  const text = `Hola, soy el dueño de ${businessName} y necesito ayuda con AgendaT.`
   return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`
 }
 
