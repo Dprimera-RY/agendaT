@@ -47,6 +47,7 @@ async function main() {
       username: 'estudio_aura',
       password: 'aura123',
       name: 'Laura Méndez',
+      emailVerified: true,
       email: 'laura@estudioaura.com',
       phone: '+5355550111',
     },
@@ -117,6 +118,7 @@ async function main() {
       username: 'kings_barber',
       password: 'kings123',
       name: 'Carlos King',
+      emailVerified: true,
       phone: '+5355550222',
     },
   })
@@ -179,6 +181,7 @@ async function main() {
       username: 'glamour_hair',
       password: 'glamour123',
       name: 'Ana Glamour',
+      emailVerified: true,
       phone: '+5355550333',
     },
   })

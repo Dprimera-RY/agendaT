@@ -49,7 +49,8 @@ export function CreateBusinessView() {
       navigate('/login')
       return
     }
-    fetch('/api/categories')
+    // ?all=1: todas las categorías, incluidas las que aún no tienen negocios
+    fetch('/api/categories?all=1')
       .then((r) => r.json())
       .then(setCategories)
       .catch(() => toast.error('No se pudieron cargar las categorías'))
@@ -81,7 +82,8 @@ export function CreateBusinessView() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Error al crear')
 
-      toast.success('¡Negocio creado! Te damos 30 días de prueba.')
+      const days = Number(data.trialDays) || 30
+      toast.success(`¡Negocio creado! Te damos ${days} días de prueba.`)
       // Refrescar la sesión para que aparezca el negocio en el dropdown
       await fetchMe()
       navigate(`/negocio/${data.slug}/panel`)

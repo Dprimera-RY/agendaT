@@ -23,12 +23,20 @@ import {
   Settings,
   Save,
   Headset,
+  LayoutDashboard,
+  BadgeCheck,
+  Lock,
+  Mail,
+  Star,
+  MessageSquare,
+  UserCheck,
 } from 'lucide-react'
 import { useRouterStore } from '@/lib/stores/router-store'
 import { useAuth } from '@/lib/stores/auth-store'
 import { CUBA_PROVINCES } from '@/lib/provinces'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -56,6 +64,8 @@ interface Owner {
   name: string
   email?: string | null
   phone?: string | null
+  emailVerified?: boolean
+  emailVerifiedAt?: string | null
   createdAt: string
   _count?: { businesses: number }
 }
@@ -138,6 +148,17 @@ interface Plan {
   active: boolean
 }
 
+interface ReviewAdmin {
+  id: string
+  businessId: string
+  customerHash: string
+  customerName?: string | null
+  rating: number
+  comment?: string | null
+  createdAt: string
+  business: { id: string; name: string; slug: string }
+}
+
 interface PaymentCode {
   id: string
   code: string
@@ -145,6 +166,7 @@ interface PaymentCode {
   planName: string
   price: number
   durationDays: number
+  kind?: string // plan | certificacion
   status: string // pendiente | pagada | rechazada
   createdAt: string
   business: { name: string; slug: string }
@@ -277,6 +299,35 @@ export function AdminPanel() {
 
   const [supportPhone, setSupportPhone] = useState('')
 
+  // Certificación y días de prueba (configurables)
+  const [certPrice, setCertPrice] = useState('')
+  const [trialFirst, setTrialFirst] = useState('30')
+  const [trialExtra, setTrialExtra] = useState('5')
+
+  // Cambiar contraseña de un dueño existente
+  const [pwdOwner, setPwdOwner] = useState<Owner | null>(null)
+  const [newPwd, setNewPwd] = useState('')
+  const [savingPwd, setSavingPwd] = useState(false)
+
+  // Correo SMTP (envío de códigos OTP de verificación y recuperación)
+  const [smtpHost, setSmtpHost] = useState('')
+  const [smtpPort, setSmtpPort] = useState('465')
+  const [smtpUser, setSmtpUser] = useState('')
+  const [smtpPass, setSmtpPass] = useState('')
+  const [smtpFrom, setSmtpFrom] = useState('')
+
+  // Cambiar mi propia contraseña (admin logueado)
+  const [currentPwd, setCurrentPwd] = useState('')
+  const [myNewPwd, setMyNewPwd] = useState('')
+  const [myNewPwd2, setMyNewPwd2] = useState('')
+  const [savingMyPwd, setSavingMyPwd] = useState(false)
+
+  // Reseñas (moderación antidifamación)
+  const [reviews, setReviews] = useState<ReviewAdmin[]>([])
+  const [editReview, setEditReview] = useState<ReviewAdmin | null>(null)
+  const [editFormReview, setEditFormReview] = useState({ rating: 5, comment: '', customerName: '' })
+  const [savingReview, setSavingReview] = useState(false)
+
   // Planes de suscripción (precios)
   const [plans, setPlans] = useState<Plan[]>([])
   const [showPlanForm, setShowPlanForm] = useState(false)
@@ -303,24 +354,39 @@ export function AdminPanel() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [o, b, l, c, s, cfg, pl, pc] = await Promise.all([
+      const [o, b, l, c, s, cfg, pl, pc, rv] = await Promise.all([
         fetch('/api/admin/owners').then((r) => r.json()),
         fetch('/api/admin/businesses').then((r) => r.json()),
         fetch('/api/admin/licenses').then((r) => r.json()),
-        fetch('/api/categories').then((r) => r.json()),
+        fetch('/api/admin/categories').then((r) => r.json()),
         fetch('/api/admin/stats').then((r) => r.json()),
         fetch('/api/admin/settings').then((r) => r.json()),
         fetch('/api/admin/plans').then((r) => r.json()),
         fetch('/api/admin/payment-codes').then((r) => r.json()),
+        fetch('/api/admin/reviews').then((r) => r.json()).catch(() => []),
       ])
       setOwners(o)
       setBusinesses(b)
       setLicenses(l)
       setCategories(c)
       if (!s?.error) setStats(s)
-      if (cfg?.supportPhone) setSupportPhone(cfg.supportPhone)
+      // /api/admin/settings devuelve un array de {key, value}
+      if (Array.isArray(cfg)) {
+        const map: Record<string, string> = {}
+        for (const st of cfg) map[st.key] = st.value
+        if (map.supportPhone) setSupportPhone(map.supportPhone)
+        if (map.certificationPrice) setCertPrice(map.certificationPrice)
+        if (map.trialDaysFirst) setTrialFirst(map.trialDaysFirst)
+        if (map.trialDaysExtra) setTrialExtra(map.trialDaysExtra)
+        if (map.smtpHost) setSmtpHost(map.smtpHost)
+        if (map.smtpPort) setSmtpPort(map.smtpPort)
+        if (map.smtpUser) setSmtpUser(map.smtpUser)
+        if (map.smtpPass) setSmtpPass(map.smtpPass)
+        if (map.smtpFrom) setSmtpFrom(map.smtpFrom)
+      }
       if (Array.isArray(pl)) setPlans(pl)
       if (Array.isArray(pc)) setPaymentCodes(pc)
+      if (Array.isArray(rv)) setReviews(rv)
     } catch {
       toast.error('Error al cargar datos')
     } finally {
@@ -414,16 +480,155 @@ export function AdminPanel() {
   // === Acciones ===
   const saveSettings = async () => {
     try {
-      const res = await fetch('/api/admin/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'supportPhone', value: supportPhone }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
+      const entries: Array<[string, string]> = [
+        ['supportPhone', supportPhone.trim()],
+        ['certificationPrice', String(Math.max(0, Number(certPrice) || 0))],
+        ['trialDaysFirst', String(Math.max(1, Number(trialFirst) || 30))],
+        ['trialDaysExtra', String(Math.max(1, Number(trialExtra) || 5))],
+        ['smtpHost', smtpHost.trim()],
+        ['smtpPort', String(Number(smtpPort) || 465)],
+        ['smtpUser', smtpUser.trim()],
+        ['smtpPass', smtpPass],
+        ['smtpFrom', smtpFrom.trim() || smtpUser.trim()],
+      ]
+      for (const [key, value] of entries) {
+        const res = await fetch('/api/admin/settings', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key, value }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error)
+      }
       toast.success('Ajustes guardados')
     } catch (e: any) {
       toast.error(e.message || 'Error al guardar')
+    }
+  }
+
+  // Cambiar mi propia contraseña (admin logueado)
+  const changeMyPassword = async () => {
+    if (!currentPwd || !myNewPwd) {
+      toast.error('Completa ambos campos')
+      return
+    }
+    if (myNewPwd.length < 4) {
+      toast.error('La contraseña nueva debe tener al menos 4 caracteres')
+      return
+    }
+    if (myNewPwd !== myNewPwd2) {
+      toast.error('Las contraseñas nuevas no coinciden')
+      return
+    }
+    setSavingMyPwd(true)
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: currentPwd, newPassword: myNewPwd }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success('Tu contraseña fue actualizada')
+      setCurrentPwd('')
+      setMyNewPwd('')
+      setMyNewPwd2('')
+    } catch (e: any) {
+      toast.error(e.message || 'Error al cambiar la contraseña')
+    } finally {
+      setSavingMyPwd(false)
+    }
+  }
+
+  // Cambiar la contraseña de un dueño
+  const changeOwnerPassword = async () => {
+    if (!pwdOwner) return
+    if (!newPwd || newPwd.length < 4) {
+      toast.error('La contraseña debe tener al menos 4 caracteres')
+      return
+    }
+    setSavingPwd(true)
+    try {
+      const res = await fetch('/api/admin/owners', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: pwdOwner.id, password: newPwd }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success(`Contraseña actualizada de @${pwdOwner.username}`)
+      setPwdOwner(null)
+      setNewPwd('')
+    } catch (e: any) {
+      toast.error(e.message || 'Error al actualizar la contraseña')
+    } finally {
+      setSavingPwd(false)
+    }
+  }
+
+  // Verificación manual de identidad de un dueño (por el admin)
+  const verifyOwner = async (o: Owner) => {
+    try {
+      const res = await fetch('/api/admin/owners', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: o.id, emailVerified: true }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success(`@${o.username} marcado como verificado`)
+      await loadAll()
+    } catch (e: any) {
+      toast.error(e.message || 'Error al verificar')
+    }
+  }
+
+  // Moderación de reseñas
+  const openEditReview = (r: ReviewAdmin) => {
+    setEditReview(r)
+    setEditFormReview({
+      rating: r.rating,
+      comment: r.comment || '',
+      customerName: r.customerName || '',
+    })
+  }
+
+  const saveReview = async () => {
+    if (!editReview) return
+    setSavingReview(true)
+    try {
+      const res = await fetch('/api/admin/reviews', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: editReview.id,
+          rating: editFormReview.rating,
+          comment: editFormReview.comment,
+          customerName: editFormReview.customerName,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success('Reseña actualizada')
+      setEditReview(null)
+      await loadAll()
+    } catch (e: any) {
+      toast.error(e.message || 'Error al guardar la reseña')
+    } finally {
+      setSavingReview(false)
+    }
+  }
+
+  const deleteReview = async (r: ReviewAdmin) => {
+    if (!confirm('¿Eliminar esta reseña de forma definitiva?')) return
+    try {
+      const res = await fetch(`/api/admin/reviews?id=${r.id}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success('Reseña eliminada')
+      await loadAll()
+    } catch (e: any) {
+      toast.error(e.message || 'Error al eliminar')
     }
   }
 
@@ -702,27 +907,42 @@ export function AdminPanel() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="grid w-full grid-cols-2 md:grid-cols-6">
-          <TabsTrigger value="overview">Resumen</TabsTrigger>
-          <TabsTrigger value="businesses">
-            <Building2 className="h-4 w-4 mr-1 md:mr-0" />
-            <span className="md:ml-1">Negocios</span>
+        {/* En móvil: barra de tabs fija al fondo (tipo app); en desktop: fila superior */}
+        <TabsList className="fixed inset-x-0 bottom-0 z-40 grid h-16 w-full grid-cols-7 gap-1 rounded-none border-t border-border bg-background/95 p-1.5 pb-[calc(env(safe-area-inset-bottom)+6px)] shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:static sm:z-auto sm:h-auto sm:w-full sm:grid-cols-4 sm:gap-0 sm:rounded-lg sm:border-t-0 sm:shadow-none sm:p-[3px] md:grid-cols-7">
+          <TabsTrigger value="overview" className="flex-col gap-0.5 sm:flex-row sm:gap-1.5">
+            <LayoutDashboard className="h-4 w-4" />
+            <span className="text-[9px] leading-none sm:hidden">Resumen</span>
+            <span className="hidden text-xs sm:inline">Resumen</span>
           </TabsTrigger>
-          <TabsTrigger value="owners">
-            <Users className="h-4 w-4 mr-1 md:mr-0" />
-            <span className="md:ml-1">Dueños</span>
+          <TabsTrigger value="businesses" className="flex-col gap-0.5 sm:flex-row sm:gap-1.5">
+            <Building2 className="h-4 w-4" />
+            <span className="text-[9px] leading-none sm:hidden">Negoc</span>
+            <span className="hidden text-xs sm:inline">Negocios</span>
           </TabsTrigger>
-          <TabsTrigger value="categories">
-            <Tags className="h-4 w-4 mr-1 md:mr-0" />
-            <span className="md:ml-1">Categorías</span>
+          <TabsTrigger value="owners" className="flex-col gap-0.5 sm:flex-row sm:gap-1.5">
+            <Users className="h-4 w-4" />
+            <span className="text-[9px] leading-none sm:hidden">Dueños</span>
+            <span className="hidden text-xs sm:inline">Dueños</span>
           </TabsTrigger>
-          <TabsTrigger value="licenses">
-            <KeyRound className="h-4 w-4 mr-1 md:mr-0" />
-            <span className="md:ml-1">Licencias</span>
+          <TabsTrigger value="categories" className="flex-col gap-0.5 sm:flex-row sm:gap-1.5">
+            <Tags className="h-4 w-4" />
+            <span className="text-[9px] leading-none sm:hidden">Categor</span>
+            <span className="hidden text-xs sm:inline">Categorías</span>
           </TabsTrigger>
-          <TabsTrigger value="settings">
-            <Settings className="h-4 w-4 mr-1 md:mr-0" />
-            <span className="md:ml-1">Ajustes</span>
+          <TabsTrigger value="reviews" className="flex-col gap-0.5 sm:flex-row sm:gap-1.5">
+            <MessageSquare className="h-4 w-4" />
+            <span className="text-[9px] leading-none sm:hidden">Reseñ</span>
+            <span className="hidden text-xs sm:inline">Reseñas</span>
+          </TabsTrigger>
+          <TabsTrigger value="licenses" className="flex-col gap-0.5 sm:flex-row sm:gap-1.5">
+            <KeyRound className="h-4 w-4" />
+            <span className="text-[9px] leading-none sm:hidden">Licen</span>
+            <span className="hidden text-xs sm:inline">Licencias</span>
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="flex-col gap-0.5 sm:flex-row sm:gap-1.5">
+            <Settings className="h-4 w-4" />
+            <span className="text-[9px] leading-none sm:hidden">Ajustes</span>
+            <span className="hidden text-xs sm:inline">Ajustes</span>
           </TabsTrigger>
         </TabsList>
 
@@ -1183,13 +1403,58 @@ export function AdminPanel() {
                     <Badge variant="secondary">{o._count?.businesses || 0} negocios</Badge>
                   </div>
                   <div className="text-xs text-muted-foreground space-y-1">
-                    {o.email && <div>✉️ {o.email}</div>}
+                    {o.email ? (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span>✉️ {o.email}</span>
+                        {o.emailVerified ? (
+                          <Badge className="bg-green-600 h-5 text-[10px] px-1.5">
+                            <UserCheck className="h-3 w-3 mr-0.5" />Verificado
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="border-amber-500 text-amber-600 h-5 text-[10px] px-1.5">
+                            Sin verificar
+                          </Badge>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <span>Sin email</span>
+                        {!o.emailVerified && (
+                          <Badge variant="outline" className="border-amber-500 text-amber-600 h-5 text-[10px] px-1.5">
+                            Sin verificar
+                          </Badge>
+                        )}
+                      </div>
+                    )}
                     {o.phone && <div>📞 {o.phone}</div>}
                     <div>📅 {new Date(o.createdAt).toLocaleDateString('es-ES')}</div>
                   </div>
-                  <Button size="sm" variant="ghost" className="w-full text-destructive" onClick={() => deleteOwner(o.id)}>
-                    <Trash2 className="h-4 w-4 mr-1" />Eliminar
-                  </Button>
+                  <div className="flex gap-2">
+                    {!o.emailVerified && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 border-green-600 text-green-700 hover:bg-green-50"
+                        onClick={() => verifyOwner(o)}
+                      >
+                        <UserCheck className="h-4 w-4 mr-1" />Verificar
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => {
+                        setPwdOwner(o)
+                        setNewPwd('')
+                      }}
+                    >
+                      <Lock className="h-4 w-4 mr-1" />Contraseña
+                    </Button>
+                    <Button size="sm" variant="ghost" className="flex-1 text-destructive" onClick={() => deleteOwner(o.id)}>
+                      <Trash2 className="h-4 w-4 mr-1" />Eliminar
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             ))}
@@ -1373,7 +1638,13 @@ export function AdminPanel() {
                             <div>{pc.business.name}</div>
                             <div className="text-xs text-muted-foreground">/{pc.business.slug}</div>
                           </td>
-                          <td className="p-2">{pc.planName} · {pc.durationDays}d</td>
+                          <td className="p-2">
+                            {pc.kind === 'certificacion' ? (
+                              <Badge className="bg-blue-600">Certificación</Badge>
+                            ) : (
+                              <>{pc.planName} · {pc.durationDays}d</>
+                            )}
+                          </td>
                           <td className="p-2 text-right">${pc.price.toLocaleString('es-ES')}</td>
                           <td className="p-2 text-center">
                             {pc.status === 'pendiente' ? (
@@ -1507,6 +1778,52 @@ export function AdminPanel() {
         {/* AJUSTES */}
         <TabsContent value="settings" className="space-y-4">
           <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Lock className="h-4 w-4 text-primary" />Mi contraseña
+              </CardTitle>
+              <CardDescription>
+                Cambia la contraseña de tu cuenta de administrador
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Contraseña actual</Label>
+                  <Input
+                    type="password"
+                    value={currentPwd}
+                    onChange={(e) => setCurrentPwd(e.target.value)}
+                    autoComplete="current-password"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Contraseña nueva</Label>
+                  <Input
+                    type="password"
+                    value={myNewPwd}
+                    onChange={(e) => setMyNewPwd(e.target.value)}
+                    autoComplete="new-password"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Repetir contraseña nueva</Label>
+                  <Input
+                    type="password"
+                    value={myNewPwd2}
+                    onChange={(e) => setMyNewPwd2(e.target.value)}
+                    autoComplete="new-password"
+                  />
+                </div>
+              </div>
+              <Button onClick={changeMyPassword} disabled={savingMyPwd}>
+                <Save className="h-4 w-4 mr-1" />
+                {savingMyPwd ? 'Guardando…' : 'Cambiar contraseña'}
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Headset className="h-5 w-5 text-primary" />Soporte a dueños
@@ -1539,6 +1856,165 @@ export function AdminPanel() {
               </Button>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <BadgeCheck className="h-4 w-4 text-primary" />Certificación y días de prueba
+              </CardTitle>
+              <CardDescription>
+                Precio de la certificación del negocio (los dueños generan un código de pago como con
+                las licencias) y días de prueba al crear un negocio nuevo
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Precio de certificación (CUP)</Label>
+                  <Input
+                    value={certPrice}
+                    onChange={(e) => setCertPrice(e.target.value.replace(/[^0-9]/g, ''))}
+                    placeholder="Ej. 500"
+                    inputMode="numeric"
+                  />
+                  <p className="text-xs text-muted-foreground">0 = certificación desactivada</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Días de prueba (primer negocio)</Label>
+                  <Input
+                    value={trialFirst}
+                    onChange={(e) => setTrialFirst(e.target.value.replace(/[^0-9]/g, ''))}
+                    placeholder="30"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Días de prueba (negocios siguientes)</Label>
+                  <Input
+                    value={trialExtra}
+                    onChange={(e) => setTrialExtra(e.target.value.replace(/[^0-9]/g, ''))}
+                    placeholder="5"
+                    inputMode="numeric"
+                  />
+                </div>
+              </div>
+              <Button onClick={saveSettings}>
+                <Save className="h-4 w-4 mr-1" />Guardar ajustes
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Mail className="h-4 w-4 text-primary" />Correo (SMTP) — verificación por email
+              </CardTitle>
+              <CardDescription>
+                Envío de códigos OTP para registro y recuperación de contraseña. Sin configurar, la
+                verificación se hace manualmente desde la pestaña Dueños.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setSmtpHost('smtp.gmail.com')
+                    setSmtpPort('465')
+                  }}
+                >
+                  Plantilla Gmail
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Gmail: usa una <b>contraseña de aplicación</b> (Google Cuenta → Seguridad →
+                  Contraseñas de aplicaciones), no tu contraseña normal.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Servidor (host)</Label>
+                  <Input value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} placeholder="smtp.gmail.com" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Puerto</Label>
+                  <Input value={smtpPort} onChange={(e) => setSmtpPort(e.target.value.replace(/[^0-9]/g, ''))} placeholder="465" inputMode="numeric" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Usuario (email)</Label>
+                  <Input type="email" value={smtpUser} onChange={(e) => setSmtpUser(e.target.value)} placeholder="tu@gmail.com" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Contraseña de aplicación</Label>
+                  <Input type="password" value={smtpPass} onChange={(e) => setSmtpPass(e.target.value)} placeholder="••••••••••••" autoComplete="off" />
+                </div>
+                <div className="space-y-1.5 md:col-span-2">
+                  <Label>Remitente (opcional)</Label>
+                  <Input value={smtpFrom} onChange={(e) => setSmtpFrom(e.target.value)} placeholder="AgendaT <tu@gmail.com>" />
+                </div>
+              </div>
+              <Button onClick={saveSettings}>
+                <Save className="h-4 w-4 mr-1" />Guardar ajustes
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* RESEÑAS (moderación antidifamación) */}
+        <TabsContent value="reviews" className="space-y-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h2 className="text-xl font-semibold">{reviews.length} reseñas</h2>
+            <p className="text-xs text-muted-foreground">
+              Edita o elimina reseñas ofensivas, falsas o difamatorias
+            </p>
+          </div>
+          {reviews.length === 0 ? (
+            <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
+              Aún no hay reseñas publicadas.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {reviews.map((r) => (
+                <Card key={r.id}>
+                  <CardContent className="p-4 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-semibold text-sm">
+                            {r.customerName || 'Cliente anónimo'}
+                          </span>
+                          <span className="inline-flex items-center gap-0.5 text-xs text-amber-500">
+                            {Array.from({ length: 5 }).map((_, i) => (
+                              <Star
+                                key={i}
+                                className={`h-3.5 w-3.5 ${i < r.rating ? 'fill-amber-400' : 'text-muted-foreground/40'}`}
+                              />
+                            ))}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {r.business.name} · {new Date(r.createdAt).toLocaleDateString('es-ES')}
+                        </p>
+                      </div>
+                    </div>
+                    {r.comment && (
+                      <p className="text-sm bg-muted/50 rounded-lg p-2 whitespace-pre-wrap break-words">
+                        {r.comment}
+                      </p>
+                    )}
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" className="flex-1" onClick={() => openEditReview(r)}>
+                        <Pencil className="h-4 w-4 mr-1" />Editar
+                      </Button>
+                      <Button size="sm" variant="ghost" className="flex-1 text-destructive" onClick={() => deleteReview(r)}>
+                        <Trash2 className="h-4 w-4 mr-1" />Eliminar
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
 
@@ -1593,6 +2069,97 @@ export function AdminPanel() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowOwnerForm(false)}>Cancelar</Button>
             <Button onClick={createOwner}>Crear dueño</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: cambiar contraseña de un dueño */}
+      <Dialog open={!!pwdOwner} onOpenChange={(o) => { if (!o) { setPwdOwner(null); setNewPwd('') } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cambiar contraseña</DialogTitle>
+            <DialogDescription>
+              {pwdOwner ? `@${pwdOwner.username} — ${pwdOwner.name}` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label>Nueva contraseña</Label>
+            <Input
+              type="text"
+              value={newPwd}
+              onChange={(e) => setNewPwd(e.target.value)}
+              placeholder="Mínimo 4 caracteres"
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setPwdOwner(null); setNewPwd('') }}>
+              Cancelar
+            </Button>
+            <Button onClick={changeOwnerPassword} disabled={savingPwd || newPwd.length < 4}>
+              {savingPwd ? 'Guardando...' : 'Guardar contraseña'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: editar reseña (moderación) */}
+      <Dialog open={!!editReview} onOpenChange={(o) => { if (!o) setEditReview(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar reseña</DialogTitle>
+            <DialogDescription>
+              {editReview ? `${editReview.business.name} — ${new Date(editReview.createdAt).toLocaleDateString('es-ES')}` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Nombre mostrado</Label>
+              <Input
+                value={editFormReview.customerName}
+                onChange={(e) => setEditFormReview({ ...editFormReview, customerName: e.target.value })}
+                placeholder="Cliente anónimo"
+                maxLength={60}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Valoración</Label>
+              <div className="flex gap-1">
+                {[1, 2, 3, 4, 5].map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setEditFormReview({ ...editFormReview, rating: v })}
+                    aria-label={`${v} estrellas`}
+                  >
+                    <Star
+                      className={`h-7 w-7 transition-colors ${
+                        v <= editFormReview.rating ? 'fill-amber-400 text-amber-500' : 'text-muted-foreground/40'
+                      }`}
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Comentario</Label>
+              <Textarea
+                value={editFormReview.comment}
+                onChange={(e) => setEditFormReview({ ...editFormReview, comment: e.target.value })}
+                rows={4}
+                maxLength={1000}
+                placeholder="Texto de la reseña..."
+              />
+              <p className="text-xs text-muted-foreground">
+                Puedes corregir o censurar contenido ofensivo sin eliminar la reseña.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditReview(null)}>Cancelar</Button>
+            <Button onClick={saveReview} disabled={savingReview}>
+              {savingReview ? 'Guardando...' : 'Guardar cambios'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

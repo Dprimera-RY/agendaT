@@ -11,6 +11,9 @@ import { LoginView } from '@/components/agenda/views/LoginView'
 import { RegisterView } from '@/components/agenda/views/RegisterView'
 import { CreateBusinessView } from '@/components/agenda/views/CreateBusinessView'
 import { MisCitasView } from '@/components/agenda/views/MisCitasView'
+import { VerifyEmailView } from '@/components/agenda/views/VerifyEmailView'
+import { ForgotPasswordView } from '@/components/agenda/views/ForgotPasswordView'
+import { TermsView } from '@/components/agenda/views/TermsView'
 import { AppShell } from '@/components/agenda/AppShell'
 
 export default function HomePage() {
@@ -47,6 +50,12 @@ export default function HomePage() {
     content = <CreateBusinessView />
   } else if (matched.name === 'mis-citas') {
     content = <MisCitasView />
+  } else if (matched.name === 'verify-email') {
+    content = <VerifyEmailView />
+  } else if (matched.name === 'forgot-password') {
+    content = <ForgotPasswordView />
+  } else if (matched.name === 'terminos') {
+    content = <TermsView />
   } else {
     content = <CatalogView />
   }

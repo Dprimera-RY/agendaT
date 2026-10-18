@@ -165,50 +165,6 @@ export function MisCitasView() {
         </p>
       </div>
 
-      {/* Código de seguimiento del dispositivo */}
-      <Card>
-        <CardContent className="p-4 space-y-3">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <KeyRound className="h-4 w-4 text-primary" />
-            Tu código en este dispositivo
-          </div>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 text-xs font-mono bg-muted rounded p-2 break-all select-all">
-              {hash || '—'}
-            </code>
-            {hash && (
-              <Button variant="outline" size="icon" onClick={handleCopy} aria-label="Copiar código">
-                <ClipboardCopy className="h-4 w-4" />
-              </Button>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Es anónimo: no contiene tus datos. Guárdalo para ver tus citas en otro dispositivo.
-          </p>
-          {hash && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <PushEnableButton target={{ targetType: 'customer', targetId: hash }} />
-            </div>
-          )}
-          <div className="flex items-end gap-2 pt-1 border-t">
-            <div className="flex-1 space-y-1.5">
-              <Label htmlFor="recovery" className="text-xs">¿En otro dispositivo? Pega tu código</Label>
-              <Input
-                id="recovery"
-                value={recoveryCode}
-                onChange={(e) => setRecoveryCode(e.target.value)}
-                placeholder="Pega aquí tu código de seguimiento"
-                className="font-mono text-xs"
-              />
-            </div>
-            <Button size="sm" onClick={handleRecover} disabled={!recoveryCode.trim()}>
-              <Search className="h-4 w-4 mr-1" />
-              Recuperar
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Listado */}
       {loading ? (
         <div className="space-y-3">
@@ -299,6 +255,50 @@ export function MisCitasView() {
           })}
         </div>
       )}
+
+      {/* Código de seguimiento del dispositivo (debajo de las citas) */}
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <KeyRound className="h-4 w-4 text-primary" />
+            Tu código en este dispositivo
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-xs font-mono bg-muted rounded p-2 break-all select-all">
+              {hash || '—'}
+            </code>
+            {hash && (
+              <Button variant="outline" size="icon" onClick={handleCopy} aria-label="Copiar código">
+                <ClipboardCopy className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Es anónimo: no contiene tus datos. Guárdalo para ver tus citas en otro dispositivo.
+          </p>
+          {hash && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <PushEnableButton target={{ targetType: 'customer', targetId: hash }} />
+            </div>
+          )}
+          <div className="flex items-end gap-2 pt-1 border-t">
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor="recovery" className="text-xs">¿En otro dispositivo? Pega tu código</Label>
+              <Input
+                id="recovery"
+                value={recoveryCode}
+                onChange={(e) => setRecoveryCode(e.target.value)}
+                placeholder="Pega aquí tu código de seguimiento"
+                className="font-mono text-xs"
+              />
+            </div>
+            <Button size="sm" onClick={handleRecover} disabled={!recoveryCode.trim()}>
+              <Search className="h-4 w-4 mr-1" />
+              Recuperar
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

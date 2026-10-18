@@ -17,6 +17,7 @@ import {
   KeyRound,
   Send,
   Bell,
+  DollarSign,
 } from 'lucide-react'
 import { useRouterStore } from '@/lib/stores/router-store'
 import { getGuestHash } from '@/lib/guest'
@@ -27,6 +28,8 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Carousel, CarouselContent, CarouselItem, CarouselPrevious, CarouselNext } from '@/components/ui/carousel'
+import { VerifiedBadge } from '@/components/agenda/VerifiedBadge'
 import { PushEnableButton } from '@/components/agenda/PushRegistrar'
 import { toast } from 'sonner'
 
@@ -44,6 +47,9 @@ interface Business {
   email?: string | null
   category: { id: string; name: string; slug: string; icon: string }
   license?: { endDate: string; active: boolean } | null
+  depositEnabled?: boolean
+  depositAmount?: number
+  certified?: boolean
   services: {
     id: string
     name: string
@@ -194,7 +200,11 @@ export function BusinessView({ slug }: { slug: string }) {
       setLoadingSlots(false)
       return
     }
-    const dateStr = selectedDate.toISOString().split('T')[0]
+    // Fecha local (no UTC): toISOString() restaría un día en zonas UTC-5
+    const y = selectedDate.getFullYear()
+    const m = String(selectedDate.getMonth() + 1).padStart(2, '0')
+    const d = String(selectedDate.getDate()).padStart(2, '0')
+    const dateStr = `${y}-${m}-${d}`
     const params = new URLSearchParams({
       businessId: business.id,
       date: dateStr,
@@ -323,9 +333,13 @@ export function BusinessView({ slug }: { slug: string }) {
       {/* HERO del negocio */}
       <Card className="overflow-hidden border-0 shadow-lg">
         <div className="grid md:grid-cols-2 gap-0">
-          <div className="aspect-video md:aspect-square bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+          <div className="aspect-video md:aspect-square bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center overflow-hidden">
             {business.logo ? (
-              <img src={business.logo} alt={business.name} className="h-full w-full object-cover" />
+              <img
+                src={business.logo}
+                alt={business.name}
+                className="h-full w-full object-cover"
+              />
             ) : (
               <span className="text-8xl font-bold text-primary/40">{business.name[0]}</span>
             )}
@@ -334,7 +348,10 @@ export function BusinessView({ slug }: { slug: string }) {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <Badge variant="secondary" className="mb-2">{business.category.name}</Badge>
-                <h1 className="text-3xl md:text-4xl font-bold tracking-tight">{business.name}</h1>
+                <h1 className="text-3xl md:text-4xl font-bold tracking-tight flex items-center gap-2">
+                  {business.name}
+                  {business.certified && <VerifiedBadge className="h-6 w-6" />}
+                </h1>
               </div>
               {reviewsState && reviewsState.count > 0 ? (
                 <div className="flex items-center gap-1 text-amber-500">
@@ -419,17 +436,30 @@ export function BusinessView({ slug }: { slug: string }) {
       {photos.length > 0 && (
         <section className="space-y-3">
           <h2 className="text-2xl font-semibold">Galería de trabajos</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {photos.map((p, i) => (
-              <button
-                key={i}
-                onClick={() => setSelectedPhoto(p)}
-                className="aspect-square overflow-hidden rounded-xl bg-muted hover:opacity-90 transition-opacity"
-              >
-                <img src={p} alt={`Trabajo ${i + 1}`} className="h-full w-full object-cover hover:scale-105 transition-transform" />
-              </button>
-            ))}
-          </div>
+          <Carousel opts={{ align: 'start', loop: photos.length > 1 }} className="w-full">
+            <CarouselContent className="-ml-2">
+              {photos.map((p, i) => (
+                <CarouselItem key={i} className="pl-2 basis-[85%] sm:basis-1/2 md:basis-1/3">
+                  <button
+                    onClick={() => setSelectedPhoto(p)}
+                    className="group relative aspect-square w-full overflow-hidden rounded-xl bg-muted hover:opacity-90 transition-opacity"
+                  >
+                    <img
+                      src={p}
+                      alt={`Trabajo ${i + 1}`}
+                      className="h-full w-full object-cover group-hover:scale-105 transition-transform"
+                    />
+                  </button>
+                </CarouselItem>
+              ))}
+            </CarouselContent>
+            {photos.length > 1 && (
+              <>
+                <CarouselPrevious className="-left-3 hidden sm:flex" />
+                <CarouselNext className="-right-3 hidden sm:flex" />
+              </>
+            )}
+          </Carousel>
         </section>
       )}
 
@@ -623,8 +653,18 @@ export function BusinessView({ slug }: { slug: string }) {
                   ¡Cita registrada con éxito!
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Tu cita quedó en estado <strong>pendiente</strong>. El dueño la confirmará
-                  una vez recibido el depósito.
+                  {business?.depositEnabled && business.depositAmount ? (
+                    <>
+                      Tu cita quedó en estado <strong>pendiente</strong>. Este negocio exige un
+                      depósito de <strong>${business.depositAmount}</strong> para confirmarla: acuerda
+                      el pago directamente con el negocio y el dueño la confirmará al recibirlo.
+                    </>
+                  ) : (
+                    <>
+                      Tu cita quedó en estado <strong>pendiente</strong>. El dueño la confirmará en
+                      breve.
+                    </>
+                  )}
                 </p>
                 <div className="text-sm space-y-1 mt-3 pt-3 border-t border-primary/10">
                   <div><strong>Servicio:</strong> {bookedSuccess.appointment.service}</div>
@@ -903,15 +943,28 @@ export function BusinessView({ slug }: { slug: string }) {
           )}
 
           {!bookedSuccess && (
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setBookingOpen(false)}>Cancelar</Button>
-              <Button
-                onClick={handleBook}
-                disabled={!selectedSlot || selectedServices.length === 0 || !customerName || !customerPhone || submitting}
-              >
-                {submitting ? 'Agendando...' : 'Confirmar cita'}
-              </Button>
-            </DialogFooter>
+            <>
+              {business?.depositEnabled && business.depositAmount ? (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
+                  <DollarSign className="h-4 w-4 mt-0.5 shrink-0" />
+                  <span>
+                    Este negocio exige un depósito de{' '}
+                    <strong>${business.depositAmount}</strong> para confirmar la cita. El método de
+                    pago lo acuerdas directamente con el negocio; la cita queda pendiente hasta que
+                    el dueño lo reciba.
+                  </span>
+                </div>
+              ) : null}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setBookingOpen(false)}>Cancelar</Button>
+                <Button
+                  onClick={handleBook}
+                  disabled={!selectedSlot || selectedServices.length === 0 || !customerName || !customerPhone || submitting}
+                >
+                  {submitting ? 'Agendando...' : 'Confirmar cita'}
+                </Button>
+              </DialogFooter>
+            </>
           )}
         </DialogContent>
       </Dialog>

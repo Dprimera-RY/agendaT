@@ -36,17 +36,36 @@ export async function GET(req: NextRequest) {
       category: true,
       license: true,
       services: { where: { active: true } },
+      reviews: { select: { rating: true } },
     },
     orderBy: { createdAt: 'desc' },
   })
 
   // Filtrar sólo los que tienen licencia activa
   const now = new Date()
-  const filtered = businesses.filter((b) => {
-    if (!b.license) return false
-    if (!b.license.active) return false
-    if (b.license.endDate < now) return false
-    return true
+  const filtered = businesses
+    .filter((b) => {
+      if (!b.license) return false
+      if (!b.license.active) return false
+      if (b.license.endDate < now) return false
+      return true
+    })
+    .map(({ reviews, ...b }) => {
+      const rating =
+        reviews.length > 0
+          ? Math.round((reviews.reduce((s, r) => s + r.rating, 0) / reviews.length) * 10) / 10
+          : null
+      return { ...b, rating, reviewCount: reviews.length }
+    })
+
+  // Orden: certificados primero, y en cada grupo por rating (sin rating al
+  // final) y en empates por nombre.
+  filtered.sort((a, b) => {
+    if (a.certified !== b.certified) return a.certified ? -1 : 1
+    const ra = a.rating ?? -1
+    const rb = b.rating ?? -1
+    if (ra !== rb) return rb - ra
+    return a.name.localeCompare(b.name, 'es')
   })
 
   return NextResponse.json(filtered)

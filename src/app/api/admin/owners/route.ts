@@ -47,6 +47,56 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// Cambiar la contraseña o el estado de verificación de un dueño
+// Body: { id, password?, emailVerified? }
+export async function PATCH(req: NextRequest) {
+  const session = await getSession()
+  if (session.role !== 'admin') {
+    return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
+  }
+  try {
+    const { id, password, emailVerified } = await req.json()
+    if (!id) {
+      return NextResponse.json({ error: 'id es requerido' }, { status: 400 })
+    }
+    if (
+      password !== undefined &&
+      (typeof password !== 'string' || password.length < 4)
+    ) {
+      return NextResponse.json(
+        { error: 'La contraseña debe tener al menos 4 caracteres' },
+        { status: 400 }
+      )
+    }
+    if (
+      password === undefined &&
+      emailVerified === undefined
+    ) {
+      return NextResponse.json(
+        { error: 'Indica password o emailVerified' },
+        { status: 400 }
+      )
+    }
+    const owner = await db.businessOwner.findUnique({ where: { id } })
+    if (!owner) {
+      return NextResponse.json({ error: 'Dueño no encontrado' }, { status: 404 })
+    }
+    await db.businessOwner.update({
+      where: { id },
+      data: {
+        ...(password !== undefined && { password }),
+        ...(typeof emailVerified === 'boolean' && {
+          emailVerified,
+          emailVerifiedAt: emailVerified ? new Date() : null,
+        }),
+      },
+    })
+    return NextResponse.json({ ok: true, username: owner.username })
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message }, { status: 500 })
+  }
+}
+
 // Eliminar dueño
 export async function DELETE(req: NextRequest) {
   const session = await getSession()

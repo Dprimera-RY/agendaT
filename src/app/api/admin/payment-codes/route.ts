@@ -43,6 +43,25 @@ export async function POST(req: NextRequest) {
     )
   }
 
+  // Certificación: al aplicar el código se certifica el negocio
+  if (payment.kind === 'certificacion') {
+    await db.$transaction([
+      db.business.update({
+        where: { id: payment.businessId },
+        data: { certified: true, certifiedAt: new Date() },
+      }),
+      db.paymentCode.update({
+        where: { id: payment.id },
+        data: { status: 'pagada' },
+      }),
+    ])
+    return NextResponse.json({
+      ok: true,
+      business: payment.business.name,
+      certified: true,
+    })
+  }
+
   const now = new Date()
   const existing = payment.business.license
   let startDate = now

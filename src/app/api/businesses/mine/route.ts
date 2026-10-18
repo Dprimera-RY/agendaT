@@ -80,9 +80,17 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    // Crear licencia inicial de prueba gratuita (30 días)
+    // Licencia de prueba: primer negocio → trialDaysFirst (30 por defecto);
+    // negocios siguientes → trialDaysExtra (5 por defecto). Ambos valores
+    // configurables desde el panel de administración (Settings).
+    // Nota: el count incluye el negocio recién creado, por eso <= 1.
+    const ownerBusinessCount = await db.business.count({ where: { ownerId } })
+    const isFirst = ownerBusinessCount <= 1
+    const trialKey = isFirst ? 'trialDaysFirst' : 'trialDaysExtra'
+    const fallbackDays = isFirst ? 30 : 5
+    const trialSetting = await db.setting.findUnique({ where: { key: trialKey } })
+    const licenseDays = Math.max(1, Number(trialSetting?.value) || fallbackDays)
     const now = new Date()
-    const licenseDays = 30
     await db.license.create({
       data: {
         businessId: business.id,
@@ -90,7 +98,7 @@ export async function POST(req: NextRequest) {
         endDate: new Date(now.getTime() + licenseDays * 24 * 60 * 60 * 1000),
         durationDays: licenseDays,
         active: true,
-        notes: 'Licencia inicial de prueba gratuita',
+        notes: `Licencia inicial de prueba gratuita (${licenseDays} días)`,
       },
     })
 
@@ -107,7 +115,7 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    return NextResponse.json(business, { status: 201 })
+    return NextResponse.json({ ...business, trialDays: licenseDays }, { status: 201 })
   } catch (e: any) {
     return NextResponse.json(
       { error: e?.message || 'Error interno' },

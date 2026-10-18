@@ -4,20 +4,25 @@ import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import {
   Search,
   Calendar as CalIcon,
+  CalendarCheck,
   MapPin,
   Sparkles,
   ChevronRight,
   X,
   Store,
-  CalendarCheck,
+  Clock,
+  Scissors,
   Loader2,
+  Star,
 } from 'lucide-react'
 import { useRouterStore } from '@/lib/stores/router-store'
+import { useCatalogStore } from '@/lib/stores/catalog-store'
 import { CUBA_PROVINCES } from '@/lib/provinces'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { VerifiedBadge } from '@/components/agenda/VerifiedBadge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Dialog,
@@ -52,6 +57,9 @@ interface Business {
   category: { id: string; name: string; slug: string; icon: string }
   services: { id: string; name: string; price: number }[]
   license?: { endDate: string; active: boolean } | null
+  certified?: boolean
+  rating?: number | null
+  reviewCount?: number
 }
 
 interface SearchResult {
@@ -76,7 +84,12 @@ function getIcon(name: string) {
 }
 
 function todayISO() {
-  return new Date().toISOString().split('T')[0]
+  // Fecha local (no UTC): toISOString() restaría un día en zonas UTC-5
+  const n = new Date()
+  const y = n.getFullYear()
+  const m = String(n.getMonth() + 1).padStart(2, '0')
+  const d = String(n.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
 }
 
 // Persistencia del filtro de provincia del visitante
@@ -88,9 +101,13 @@ export function CatalogView() {
 
   // Lista de negocios: null = aún sin cargar (deriva el estado de loading)
   const [businesses, setBusinesses] = useState<Business[] | null>(null)
-  const [q, setQ] = useState('')
+  // Búsqueda y categoría viven en el store del catálogo: al entrar a un negocio
+  // y volver, se restauran los filtros con los que se estaba navegando.
+  const q = useCatalogStore((s) => s.q)
+  const setQ = useCatalogStore((s) => s.setQ)
+  const categoryId = useCatalogStore((s) => s.categoryId)
+  const setCategoryId = useCatalogStore((s) => s.setCategoryId)
   const deferredQ = useDeferredValue(q)
-  const [categoryId, setCategoryId] = useState<string>('all')
 
   // Filtro de provincia (persistido en localStorage; modal solo la primera vez)
   const [province, setProvince] = useState<string>('all')
@@ -114,12 +131,14 @@ export function CatalogView() {
       .then((r) => r.json())
       .then((data) => {
         setCategories(data)
-        setCategoryId((prev) =>
-          prev !== 'all' && !data.some((c: Category) => c.id === prev) ? 'all' : prev
-        )
+        // Leer el valor actual del store (evita meter categoryId en deps y re-fetch)
+        const current = useCatalogStore.getState().categoryId
+        if (current !== 'all' && !data.some((c: Category) => c.id === current)) {
+          setCategoryId('all')
+        }
       })
       .catch(() => toast.error('No se pudieron cargar las categorías'))
-  }, [province])
+  }, [province, setCategoryId])
 
   // Cargar provincia guardada; si es la primera visita, abrir el modal de selección
   useEffect(() => {
@@ -185,7 +204,7 @@ export function CatalogView() {
   )
 
   const toggleCategory = (c: Category) => {
-    setCategoryId((prev) => (prev === c.id ? 'all' : c.id))
+    setCategoryId(categoryId === c.id ? 'all' : c.id)
   }
 
   // Aplicar el filtro de categoría actual al abrir el modal de reserva
@@ -233,24 +252,29 @@ export function CatalogView() {
   }
 
   return (
-    <div className="relative min-h-full">
-      <div className="container mx-auto px-4 py-10 space-y-10 pb-28">
-        {/* HERO con énfasis en la búsqueda */}
-        <section className="text-center space-y-6 pt-4">
-          <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary">
-            <Sparkles className="h-3.5 w-3.5" />
-            Plataforma multi-negocio
+    <div className="relative min-h-full bg-gradient-to-b from-primary/[0.06] via-background to-background">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-[radial-gradient(ellipse_at_top,primary/10,transparent_70%)]"
+      />
+      {/* Decoración de fondo con iconos de la app (citas, horarios, servicios) */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+        <CalIcon className="absolute -left-16 top-40 h-56 w-56 -rotate-12 text-primary/[0.06]" strokeWidth={1.5} />
+        <Clock className="absolute -right-12 top-[38%] h-48 w-48 rotate-12 text-primary/[0.05]" strokeWidth={1.5} />
+        <Scissors className="absolute bottom-40 left-[8%] h-44 w-44 rotate-6 text-primary/[0.05]" strokeWidth={1.5} />
+        <CalendarCheck className="absolute right-[10%] top-28 h-40 w-40 -rotate-6 text-primary/[0.06]" strokeWidth={1.5} />
+      </div>
+      <div className="container relative mx-auto px-4 py-6 space-y-6 pb-28 sm:py-10 sm:space-y-10">
+        {/* HERO compacto: el foco está en el buscador y los negocios */}
+        <section className="space-y-4 pt-1">
+          <div className="flex flex-col items-center gap-1.5 text-center">
+            <h1 className="max-w-2xl text-2xl font-semibold tracking-tight sm:text-3xl md:text-4xl">
+              Encuentra el servicio que necesitas
+            </h1>
+            <p className="max-w-xl text-sm text-muted-foreground">
+              Busca negocios o servicios y agenda tu cita sin llamadas ni esperas.
+            </p>
           </div>
-          <h1 className="mx-auto max-w-3xl text-4xl font-bold tracking-tight md:text-5xl">
-            Encuentra el servicio que necesitas
-            <span className="block bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
-              y reserva en segundos
-            </span>
-          </h1>
-          <p className="mx-auto max-w-2xl text-lg text-muted-foreground">
-            Busca negocios o servicios por nombre, filtra por categoría y agenda
-            tu cita sin llamadas ni esperas.
-          </p>
 
           {/* Buscador principal */}
           <div className="mx-auto w-full max-w-2xl">
@@ -279,7 +303,7 @@ export function CatalogView() {
                 )}
               </div>
             </div>
-            <p className="mt-2 text-xs text-muted-foreground">
+            <p className="mt-2 hidden text-xs text-muted-foreground sm:block">
               ¿Sabes qué hora te conviene? Usa el botón{" "}
               <span className="font-medium text-foreground">Reservar</span> para
               buscar huecos disponibles por día y hora.
@@ -355,9 +379,12 @@ export function CatalogView() {
           </div>
 
           {loading && !businesses ? (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="flex flex-col gap-3 sm:grid sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
               {Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="h-80 animate-pulse rounded-2xl bg-muted" />
+                <div
+                  key={i}
+                  className="h-28 animate-pulse rounded-xl bg-muted sm:h-80 sm:rounded-2xl"
+                />
               ))}
             </div>
           ) : !businesses || businesses.length === 0 ? (
@@ -378,7 +405,7 @@ export function CatalogView() {
             </Card>
           ) : (
             <div
-              className={`grid grid-cols-1 gap-4 transition-opacity sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 ${
+              className={`flex flex-col gap-3 transition-opacity sm:grid sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4 ${
                 loading ? 'opacity-60' : ''
               }`}
             >
@@ -612,9 +639,9 @@ function BusinessCard({
   return (
     <Card
       onClick={onClick}
-      className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border-border/70 transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-lg"
+      className="group flex cursor-pointer flex-row overflow-hidden rounded-xl border-border/70 transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-lg sm:flex-col sm:rounded-2xl"
     >
-      <div className="relative aspect-[4/3] overflow-hidden bg-muted">
+      <div className="relative h-28 w-28 shrink-0 overflow-hidden bg-muted sm:h-auto sm:w-full sm:aspect-[4/3]">
         {business.logo || business.photo1 ? (
           <img
             src={business.logo || business.photo1 || ''}
@@ -623,18 +650,18 @@ function BusinessCard({
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary/20 to-primary/5">
-            <span className="text-5xl font-bold text-primary/30">
+            <span className="text-3xl font-bold text-primary/30 sm:text-5xl">
               {business.name[0]}
             </span>
           </div>
         )}
-        <Badge className="absolute left-3 top-3 bg-background/90 text-foreground backdrop-blur">
+        <Badge className="absolute left-3 top-3 hidden bg-background/90 text-foreground backdrop-blur sm:block">
           {business.category.name}
         </Badge>
         {business.province && (
           <Badge
             variant="outline"
-            className="absolute right-3 top-3 bg-background/90 text-foreground backdrop-blur"
+            className="absolute right-3 top-3 hidden bg-background/90 text-foreground backdrop-blur sm:block"
           >
             <MapPin className="mr-1 h-3 w-3" />
             {business.province}
@@ -642,18 +669,39 @@ function BusinessCard({
         )}
       </div>
 
-      <CardContent className="flex flex-1 flex-col gap-2 p-4">
-        <h3 className="line-clamp-1 font-semibold transition-colors group-hover:text-primary">
-          {business.name}
-        </h3>
+      <CardContent className="flex min-w-0 flex-1 flex-col gap-1.5 p-3 sm:gap-2 sm:p-4">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <h3 className="line-clamp-1 font-semibold transition-colors group-hover:text-primary">
+            {business.name}
+          </h3>
+          {business.certified && <VerifiedBadge />}
+          {business.rating != null && business.rating > 0 && (
+            <span className="inline-flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground">
+              <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-500" />
+              {business.rating}
+              {business.reviewCount ? <span className="text-[10px]">({business.reviewCount})</span> : null}
+            </span>
+          )}
+        </div>
+        {/* Badges en línea solo en móvil (en desktop van sobre la imagen) */}
+        <div className="flex items-center gap-1.5 sm:hidden">
+          <Badge variant="secondary" className="text-[10px]">
+            {business.category.name}
+          </Badge>
+          {business.province && (
+            <Badge variant="outline" className="text-[10px]">
+              {business.province}
+            </Badge>
+          )}
+        </div>
         {business.description && (
-          <p className="line-clamp-2 text-sm text-muted-foreground">
+          <p className="line-clamp-1 text-sm text-muted-foreground sm:line-clamp-2">
             {business.description}
           </p>
         )}
 
         {matchedServices.length > 0 && (
-          <div className="flex flex-wrap gap-1">
+          <div className="hidden flex-wrap gap-1 sm:flex">
             {matchedServices.slice(0, 3).map((s) => (
               <span
                 key={s.id}
@@ -672,7 +720,7 @@ function BusinessCard({
           </p>
         )}
 
-        <div className="mt-auto flex items-center justify-between pt-2">
+        <div className="mt-auto flex items-center justify-between pt-1 sm:pt-2">
           {minPrice !== null ? (
             <p className="text-sm text-muted-foreground">
               Desde{' '}
@@ -682,7 +730,7 @@ function BusinessCard({
             <span />
           )}
           <span className="inline-flex items-center text-sm font-medium text-primary">
-            Ver y agendar
+            <span className="hidden sm:inline">Ver y agendar</span>
             <ChevronRight className="ml-0.5 h-4 w-4 transition-transform group-hover:translate-x-0.5" />
           </span>
         </div>

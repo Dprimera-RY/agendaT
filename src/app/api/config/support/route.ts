@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
-// Configuración pública mínima para la app (número de soporte del admin)
+// Configuración pública mínima para la app (soporte y precio de certificación)
 export async function GET() {
-  const setting = await db.setting.findUnique({ where: { key: 'supportPhone' } })
-  return NextResponse.json({ supportPhone: setting?.value || null })
+  const [support, certPrice] = await Promise.all([
+    db.setting.findUnique({ where: { key: 'supportPhone' } }),
+    db.setting.findUnique({ where: { key: 'certificationPrice' } }),
+  ])
+  return NextResponse.json({
+    supportPhone: support?.value || null,
+    certificationPrice: certPrice ? Number(certPrice.value) || 0 : 0,
+  })
 }

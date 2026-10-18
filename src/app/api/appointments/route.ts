@@ -169,6 +169,10 @@ export async function POST(req: NextRequest) {
               date: new Date(cursor),
               status: 'pendiente',
               notes,
+              // Si el negocio exige depósito, queda registrado el monto esperado
+              ...(business.depositEnabled && business.depositAmount > 0
+                ? { depositAmount: business.depositAmount }
+                : {}),
             },
             include: { service: true, business: true },
           })

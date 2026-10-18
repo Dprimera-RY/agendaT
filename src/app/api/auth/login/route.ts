@@ -41,6 +41,18 @@ export async function POST(req: NextRequest) {
       },
     })
     if (owner && owner.password === password) {
+      // Identidad: la cuenta no puede usarse hasta verificar el email (OTP)
+      if (!owner.emailVerified) {
+        return NextResponse.json(
+          {
+            error:
+              'Tu correo aún no está verificado. Revisa tu email con el código de verificación o pide verificación al administrador.',
+            needsVerification: true,
+            email: owner.email || undefined,
+          },
+          { status: 403 }
+        )
+      }
       await setSession({
         role: 'owner',
         ownerId: owner.id,

@@ -25,6 +25,8 @@ import {
   BarChart3,
   RotateCcw,
   CreditCard,
+  Share2,
+  BadgeCheck,
 } from 'lucide-react'
 import { useRouterStore } from '@/lib/stores/router-store'
 import { useAuth } from '@/lib/stores/auth-store'
@@ -42,6 +44,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
 import { ImageField } from '@/components/agenda/ImageField'
 import { PushEnableButton } from '@/components/agenda/PushRegistrar'
+import { VerifiedBadge } from '@/components/agenda/VerifiedBadge'
 import {
   Area,
   AreaChart,
@@ -87,6 +90,9 @@ interface Business {
   email?: string | null
   categoryId: string
   ownerId: string
+  certified?: boolean
+  depositEnabled?: boolean
+  depositAmount?: number
   category: { id: string; name: string; slug: string; icon: string }
   license?: { id: string; startDate: string; endDate: string; durationDays: number; active: boolean } | null
 }
@@ -171,6 +177,16 @@ export function BusinessPanel({ slug }: { slug: string }) {
   const [selectedAppt, setSelectedAppt] = useState<Appointment | null>(null)
   const [viewMode, setViewMode] = useState<'month' | 'week' | 'day'>('week')
 
+  // En móvil la vista por defecto es Día: targets táctiles grandes y sin
+  // scroll horizontal (la vista Semana requiere desplazarse en pantallas chicas).
+  // setTimeout(0): evita setState síncrono en el cuerpo del effect (lint).
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (window.innerWidth < 640) setViewMode('day')
+    }, 0)
+    return () => clearTimeout(t)
+  }, [])
+
   // Drag & drop (reprogramar arrastrando)
   const [dragId, setDragId] = useState<string | null>(null)
 
@@ -181,8 +197,15 @@ export function BusinessPanel({ slug }: { slug: string }) {
 
   // Modal "agendar cita" del dueño
   const [bookPrefill, setBookPrefill] = useState<{ date: string; time: string } | null>(null)
-  const [bookForm, setBookForm] = useState({ customerName: '', customerPhone: '', serviceId: '', notes: '' })
+  const [bookForm, setBookForm] = useState({ customerName: '', customerPhone: '', serviceIds: [] as string[], notes: '' })
   const [booking, setBooking] = useState(false)
+
+  // Selección múltiple de servicios en el modal del dueño
+  const toggleBookService = (id: string) =>
+    setBookForm((f) => ({
+      ...f,
+      serviceIds: f.serviceIds.includes(id) ? f.serviceIds.filter((s) => s !== id) : [...f.serviceIds, id],
+    }))
 
   // Tab servicios
   const [services, setServices] = useState<Service[]>([])
@@ -195,6 +218,11 @@ export function BusinessPanel({ slug }: { slug: string }) {
 
   // Soporte (teléfono configurable desde admin)
   const [supportPhone, setSupportPhone] = useState<string | null>(null)
+  // Precio de certificación (0 = no disponible)
+  const [certPrice, setCertPrice] = useState(0)
+
+  // KPIs: en móvil se ocultan por defecto y se muestran con el toggle
+  const [kpisOpen, setKpisOpen] = useState(false)
 
   // KPIs clickeables: lista de citas según el card seleccionado
   const [kpiFilter, setKpiFilter] = useState<KpiFilter>(null)
@@ -225,6 +253,8 @@ export function BusinessPanel({ slug }: { slug: string }) {
         province: data.province,
         phone: data.phone,
         email: data.email,
+        depositEnabled: data.depositEnabled,
+        depositAmount: data.depositAmount,
       })
     } catch {
       toast.error('Negocio no encontrado')
@@ -264,7 +294,10 @@ export function BusinessPanel({ slug }: { slug: string }) {
     fetch('/api/config/support')
       .then((r) => r.json())
       .then((d) => {
-        if (!cancelled) setSupportPhone(d.supportPhone || null)
+        if (!cancelled) {
+          setSupportPhone(d.supportPhone || null)
+          setCertPrice(Number(d.certificationPrice) || 0)
+        }
       })
       .catch(() => {})
     return () => {
@@ -283,15 +316,22 @@ export function BusinessPanel({ slug }: { slug: string }) {
     }
   }, [business, session, slug, navigate])
 
-  // Cargar citas del mes actual
+  // Cargar citas del mes actual (rango ampliado a semanas completas para la vista Semana)
   const loadAppointments = useCallback(async () => {
     if (!business) return
-    const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)
-    const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59)
+    const first = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)
+    const last = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0)
+    // Extender al domingo anterior al 1 y al sábado posterior al fin de mes,
+    // para que la vista Semana pinte días de meses vecinos con sus citas.
+    const from = new Date(first)
+    from.setDate(first.getDate() - first.getDay())
+    const to = new Date(last)
+    to.setDate(last.getDate() + (6 - last.getDay()))
+    to.setHours(23, 59, 59)
     const params = new URLSearchParams({
       businessId: business.id,
-      from: startOfMonth.toISOString(),
-      to: endOfMonth.toISOString(),
+      from: from.toISOString(),
+      to: to.toISOString(),
     })
     const res = await fetch(`/api/appointments?${params}`)
     const data = await res.json()
@@ -395,24 +435,23 @@ export function BusinessPanel({ slug }: { slug: string }) {
     const d = new Date(date)
     const h = hour !== undefined ? hour : 9
     setBookPrefill({ date: dayKey(d), time: `${String(h).padStart(2, '0')}:00` })
-    setBookForm({ customerName: '', customerPhone: '', serviceId: '', notes: '' })
+    setBookForm({ customerName: '', customerPhone: '', serviceIds: [], notes: '' })
   }, [])
 
   const handleBookOwner = async () => {
     if (!business || !bookPrefill) return
-    if (!bookForm.customerName || !bookForm.customerPhone || !bookForm.serviceId) {
-      toast.error('Nombre, teléfono y servicio son obligatorios')
+    if (!bookForm.customerName || !bookForm.customerPhone || bookForm.serviceIds.length === 0) {
+      toast.error('Nombre, teléfono y al menos un servicio son obligatorios')
       return
     }
     setBooking(true)
     try {
       const dateISO = new Date(`${bookPrefill.date}T${bookPrefill.time}`).toISOString()
-      const res = await fetch('/api/appointments', {
-        method: 'POST',
+      const res = await fetch('/api/appointments', {        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           businessId: business.id,
-          serviceId: bookForm.serviceId,
+          serviceIds: bookForm.serviceIds,
           customerName: bookForm.customerName,
           customerPhone: bookForm.customerPhone,
           date: dateISO,
@@ -446,6 +485,32 @@ export function BusinessPanel({ slug }: { slug: string }) {
     } catch {
       toast.error('Error al guardar')
     }
+  }
+
+  // Compartir el enlace del negocio por WhatsApp (copia el link también).
+  // Contextos no seguros (HTTP por IP local) no tienen clipboard API: fallback.
+  const shareBusinessLink = () => {
+    if (!business) return
+    const url = `${window.location.origin}/#/negocio/${business.slug}`
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).catch(() => {})
+      } else {
+        const ta = document.createElement('textarea')
+        ta.value = url
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand('copy')
+        document.body.removeChild(ta)
+      }
+      toast.success('Enlace copiado')
+    } catch {
+      // sin copia: aún así se abre WhatsApp
+    }
+    const text = `Te comparto mi negocio en AgendaT 👇\n${url}`
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank')
   }
 
   const handleSaveAvailability = async (
@@ -483,9 +548,10 @@ export function BusinessPanel({ slug }: { slug: string }) {
   // Stats
   const stats = useMemo(() => {
     const now = new Date()
-    const monthAppts = appointments.filter(
-      (a) => new Date(a.date).getMonth() === now.getMonth()
-    )
+    const monthAppts = appointments.filter((a) => {
+      const d = new Date(a.date)
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+    })
     return {
       total: appointments.length,
       pendientes: monthAppts.filter((a) => a.status === 'pendiente').length,
@@ -537,17 +603,23 @@ export function BusinessPanel({ slug }: { slug: string }) {
         <div className="flex items-center gap-3">
           <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center overflow-hidden">
             {business.logo ? (
-              <img src={business.logo} alt={business.name} className="h-full w-full object-cover" />
+              <img src={business.logo} alt={business.name} className="h-full w-full object-contain" />
             ) : (
               <span className="text-xl font-bold text-primary">{business.name[0]}</span>
             )}
           </div>
           <div>
-            <h1 className="text-2xl font-bold">{business.name}</h1>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              {business.name}
+              {business.certified && <VerifiedBadge />}
+            </h1>
             <p className="text-sm text-muted-foreground">/negocio/{business.slug}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={shareBusinessLink}>
+            <Share2 className="h-4 w-4 mr-1" />Compartir
+          </Button>
           <PushEnableButton
             target={
               session.ownerId
@@ -568,8 +640,17 @@ export function BusinessPanel({ slug }: { slug: string }) {
         </div>
       </div>
 
-      {/* Stats (clickeables: muestran la lista de citas) */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {/* Stats: en móvil se ocultan por defecto (toggle), en desktop siempre visibles */}
+      <div className="flex items-center justify-between gap-2 sm:hidden">
+        <span className="text-sm font-medium text-muted-foreground">Resumen del mes</span>
+        <Button variant="ghost" size="sm" onClick={() => setKpisOpen((v) => !v)}>
+          <ChevronDown
+            className={`h-4 w-4 mr-1 transition-transform ${kpisOpen ? 'rotate-180' : ''}`}
+          />
+          {kpisOpen ? 'Ocultar datos' : 'Ver datos'}
+        </Button>
+      </div>
+      <div className={`${kpisOpen ? 'grid' : 'hidden'} sm:grid grid-cols-2 md:grid-cols-4 gap-3`}>
         <Card
           role="button"
           tabIndex={0}
@@ -624,39 +705,53 @@ export function BusinessPanel({ slug }: { slug: string }) {
         </Card>
       </div>
 
-      {/* Tabs principales */}
+      {/* Tabs principales: en móvil es una barra fija al fondo (tipo app);
+          en desktop, una fila de tabs arriba del contenido */}
       <Tabs defaultValue="calendar">
-        <TabsList className="grid w-full grid-cols-3 lg:grid-cols-6">
-          <TabsTrigger value="calendar">
-            <CalendarIcon className="h-4 w-4 mr-1" />Calendario
+        <TabsList className="fixed inset-x-0 bottom-0 z-40 grid h-16 w-full grid-cols-6 gap-1 rounded-none border-t border-border bg-background/95 p-1.5 pb-[calc(env(safe-area-inset-bottom)+6px)] shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:static sm:z-auto sm:h-auto sm:grid-cols-3 sm:gap-0 sm:rounded-lg sm:border-t-0 sm:shadow-none sm:p-[3px] lg:grid-cols-6">
+          <TabsTrigger value="calendar" className="flex-col gap-0.5 sm:flex-row sm:gap-1.5">
+            <CalendarIcon className="h-4 w-4" />
+            <span className="text-[9px] leading-none sm:hidden">Cal</span>
+            <span className="hidden text-xs sm:inline">Calendario</span>
           </TabsTrigger>
-          <TabsTrigger value="services">
-            <Scissors className="h-4 w-4 mr-1" />Servicios
+          <TabsTrigger value="services" className="flex-col gap-0.5 sm:flex-row sm:gap-1.5">
+            <Scissors className="h-4 w-4" />
+            <span className="text-[9px] leading-none sm:hidden">Serv</span>
+            <span className="hidden text-xs sm:inline">Servicios</span>
           </TabsTrigger>
-          <TabsTrigger value="availability">
-            <Clock className="h-4 w-4 mr-1" />Disponibilidad
+          <TabsTrigger value="availability" className="flex-col gap-0.5 sm:flex-row sm:gap-1.5">
+            <Clock className="h-4 w-4" />
+            <span className="text-[9px] leading-none sm:hidden">Horario</span>
+            <span className="hidden text-xs sm:inline">Disponibilidad</span>
           </TabsTrigger>
-          <TabsTrigger value="stats">
-            <BarChart3 className="h-4 w-4 mr-1" />Estadísticas
+          <TabsTrigger value="stats" className="flex-col gap-0.5 sm:flex-row sm:gap-1.5">
+            <BarChart3 className="h-4 w-4" />
+            <span className="text-[9px] leading-none sm:hidden">Datos</span>
+            <span className="hidden text-xs sm:inline">Estadísticas</span>
           </TabsTrigger>
-          <TabsTrigger value="license">
-            <KeyRound className="h-4 w-4 mr-1" />Licencia
+          <TabsTrigger value="license" className="flex-col gap-0.5 sm:flex-row sm:gap-1.5">
+            <KeyRound className="h-4 w-4" />
+            <span className="text-[9px] leading-none sm:hidden">Lic</span>
+            <span className="hidden text-xs sm:inline">Licencia</span>
           </TabsTrigger>
-          <TabsTrigger value="settings">
-            <Settings className="h-4 w-4 mr-1" />Ajustes
+          <TabsTrigger value="settings" className="flex-col gap-0.5 sm:flex-row sm:gap-1.5">
+            <Settings className="h-4 w-4" />
+            <span className="text-[9px] leading-none sm:hidden">Ajustes</span>
+            <span className="hidden text-xs sm:inline">Ajustes</span>
           </TabsTrigger>
         </TabsList>
 
         {/* CALENDARIO */}
         <TabsContent value="calendar" className="space-y-3">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex flex-col gap-2 sm:flex-wrap sm:flex-row sm:items-center sm:justify-between">
             <CalendarHeader
               currentDate={currentDate}
               onChange={setCurrentDate}
               viewMode={viewMode}
               onViewModeChange={setViewMode}
             />
-            <Button size="sm" onClick={() => openBookDialog(new Date())}>
+            {/* Acción principal: destacada y a todo el ancho en móvil */}
+            <Button size="sm" className="order-first w-full sm:order-none sm:w-auto" onClick={() => openBookDialog(new Date())}>
               <Plus className="h-4 w-4 mr-1" />Agendar cita
             </Button>
           </div>
@@ -686,6 +781,7 @@ export function BusinessPanel({ slug }: { slug: string }) {
               onDragEnd={() => setDragId(null)}
               hasConflict={hasConflict}
               onDropDay={handleDropDay}
+              availabilities={availabilities}
             />
           )}
           {viewMode === 'day' && (
@@ -724,7 +820,13 @@ export function BusinessPanel({ slug }: { slug: string }) {
 
         {/* LICENCIA */}
         <TabsContent value="license">
-          <LicenseTab license={business.license} supportPhone={supportPhone} businessId={business.id} />
+          <LicenseTab
+            license={business.license}
+            supportPhone={supportPhone}
+            businessId={business.id}
+            certified={business.certified}
+            certPrice={certPrice}
+          />
         </TabsContent>
 
         {/* AJUSTES */}
@@ -776,6 +878,8 @@ export function BusinessPanel({ slug }: { slug: string }) {
                     <span className="text-muted-foreground">Depósito:</span>{' '}
                     {selectedAppt.depositPaid ? (
                       <Badge variant="default" className="bg-green-600">Pagado ${selectedAppt.depositAmount || ''}</Badge>
+                    ) : business?.depositEnabled ? (
+                      <Badge variant="secondary">Pendiente · ${business.depositAmount || 0}</Badge>
                     ) : (
                       <Badge variant="secondary">Pendiente</Badge>
                     )}
@@ -863,24 +967,37 @@ export function BusinessPanel({ slug }: { slug: string }) {
                 </div>
               </div>
               <DialogFooter className="flex-wrap gap-2">
-                {selectedAppt.status === 'pendiente' && (
-                  <Button
-                    onClick={() => handleUpdateAppointment(selectedAppt.id, { status: 'confirmada' })}
-                    className="bg-green-600 hover:bg-green-700"
-                  >
-                    <CheckCircle2 className="h-4 w-4 mr-1" />Aceptar
-                  </Button>
-                )}
-                {selectedAppt.status === 'pendiente' && !selectedAppt.depositPaid && (
-                  <Button
-                    onClick={() => handleUpdateAppointment(selectedAppt.id, {
-                      depositPaid: true,
-                      depositAmount: selectedAppt.service?.price,
-                    })}
-                  >
-                    <DollarSign className="h-4 w-4 mr-1" />Confirmar depósito
-                  </Button>
-                )}
+                {selectedAppt.status === 'pendiente' &&
+                  (business?.depositEnabled ? (
+                    !selectedAppt.depositPaid ? (
+                      <Button
+                        onClick={() =>
+                          handleUpdateAppointment(selectedAppt.id, {
+                            depositPaid: true,
+                            depositAmount: business.depositAmount || 0,
+                          })
+                        }
+                        className="bg-green-600 hover:bg-green-700"
+                      >
+                        <DollarSign className="h-4 w-4 mr-1" />
+                        Depósito recibido (${business.depositAmount || 0})
+                      </Button>
+                    ) : (
+                      <Button
+                        onClick={() => handleUpdateAppointment(selectedAppt.id, { status: 'confirmada' })}
+                        className="bg-green-600 hover:bg-green-700"
+                      >
+                        <CheckCircle2 className="h-4 w-4 mr-1" />Aceptar
+                      </Button>
+                    )
+                  ) : (
+                    <Button
+                      onClick={() => handleUpdateAppointment(selectedAppt.id, { status: 'confirmada' })}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      <CheckCircle2 className="h-4 w-4 mr-1" />Aceptar
+                    </Button>
+                  ))}
                 {selectedAppt.status !== 'completada' && selectedAppt.status !== 'cancelada' && (
                   <Button
                     variant="secondary"
@@ -1002,19 +1119,49 @@ export function BusinessPanel({ slug }: { slug: string }) {
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Servicio *</Label>
-              <Select value={bookForm.serviceId} onValueChange={(v) => setBookForm({ ...bookForm, serviceId: v })}>
-                <SelectTrigger aria-label="Servicio">
-                  <SelectValue placeholder="Selecciona un servicio" />
-                </SelectTrigger>
-                <SelectContent>
-                  {services.filter((s) => s.active).map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name} · ${s.price} · {s.durationMin} min
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-xs">Servicios * (puedes elegir varios)</Label>
+                {bookForm.serviceIds.length > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    {services
+                      .filter((s) => bookForm.serviceIds.includes(s.id))
+                      .reduce((sum, s) => sum + s.durationMin, 0)}{' '}
+                    min · $
+                    {services
+                      .filter((s) => bookForm.serviceIds.includes(s.id))
+                      .reduce((sum, s) => sum + s.price, 0)}
+                  </span>
+                )}
+              </div>
+              <div className="grid gap-1.5 max-h-44 overflow-y-auto pr-1">
+                {services.filter((s) => s.active).map((s) => {
+                  const on = bookForm.serviceIds.includes(s.id)
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => toggleBookService(s.id)}
+                      className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                        on ? 'border-primary bg-primary/10 font-medium' : 'border-border hover:bg-muted/50'
+                      }`}
+                    >
+                      <span className="truncate">{s.name}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        ${s.price} · {s.durationMin} min
+                      </span>
+                    </button>
+                  )
+                })}
+                {services.filter((s) => s.active).length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    No hay servicios activos. Crea uno en la pestaña Servicios.
+                  </p>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Los servicios se agendarán uno tras otro, encadenando la duración total.
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1.5">
@@ -1099,26 +1246,29 @@ function CalendarHeader({
   }
 
   return (
-    <div className="flex items-center justify-between gap-2 flex-wrap">
+    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="icon" onClick={() => change(-1)}>
+        <Button variant="outline" size="icon" onClick={() => change(-1)} aria-label="Anterior">
           <ChevronLeft className="h-4 w-4" />
         </Button>
-        <Button variant="outline" size="icon" onClick={() => change(1)}>
+        <Button variant="outline" size="icon" onClick={() => change(1)} aria-label="Siguiente">
           <ChevronRight className="h-4 w-4" />
         </Button>
-        <h2 className="text-lg font-semibold capitalize ml-2">{label}</h2>
+        <h2 className="min-w-0 flex-1 truncate text-base font-semibold capitalize sm:flex-none sm:text-lg sm:ml-2">
+          {label}
+        </h2>
         <Button variant="ghost" size="sm" onClick={() => onChange(new Date())}>
           Hoy
         </Button>
       </div>
-      <div className="flex bg-muted rounded-lg p-1">
+      {/* Selector día/semana/mes: ancho completo con targets grandes en móvil */}
+      <div className="flex w-full rounded-lg bg-muted p-1 sm:w-auto">
         {(['day', 'week', 'month'] as const).map((m) => (
           <button
             key={m}
             onClick={() => onViewModeChange(m)}
-            className={`px-3 py-1 text-sm rounded-md transition-colors ${
-              viewMode === m ? 'bg-background shadow-sm font-medium' : 'text-muted-foreground'
+            className={`flex-1 rounded-md px-3 py-1.5 text-sm transition-colors sm:flex-none sm:py-1 ${
+              viewMode === m ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground'
             }`}
           >
             {m === 'day' ? 'Día' : m === 'week' ? 'Semana' : 'Mes'}
@@ -1140,6 +1290,7 @@ interface CalendarViewProps {
   onDragEnd: () => void
   hasConflict: (apptId: string, newDate: Date) => boolean
   onDropDay: (day: Date, hour?: number) => void
+  availabilities?: Availability[]
 }
 
 function MonthView({
@@ -1186,7 +1337,7 @@ function MonthView({
   }
 
   return (
-    <Card>
+    <Card className="border-primary/20 shadow-sm">
       <CardContent className="p-2 sm:p-4">
         <div className="grid grid-cols-7 gap-1">
           {DAYS.map((d) => (
@@ -1213,7 +1364,7 @@ function MonthView({
                   setConflictKey(null)
                   onDropDay(cell.date)
                 }}
-                className={`min-h-20 sm:min-h-28 border rounded-md p-1 transition-colors ${
+                className={`min-h-24 sm:min-h-28 border rounded-md p-1 transition-colors ${
                   cell.day
                     ? isToday
                       ? 'bg-primary/5 border-primary/30'
@@ -1225,7 +1376,9 @@ function MonthView({
               >
                 {cell.day && (
                   <>
-                    <div className="text-xs font-medium mb-1">{cell.day}</div>
+                    <div className={`mb-1 text-xs ${isToday ? 'font-bold text-primary' : 'font-medium'}`}>
+                      {cell.day}
+                    </div>
                     <div className="space-y-1">
                       {dayAppts.slice(0, 3).map((a) => {
                         const v = apptVisual(a, services)
@@ -1242,7 +1395,7 @@ function MonthView({
                               e.stopPropagation()
                               onSlotClick(a)
                             }}
-                            className="w-full text-left text-[10px] px-1.5 py-0.5 rounded truncate transition-colors hover:opacity-80"
+                            className="w-full text-left text-[11px] px-1.5 py-1 rounded truncate transition-colors hover:opacity-80 sm:text-[10px] sm:py-0.5"
                             style={{ background: v.bg, color: v.fg, borderLeft: `3px solid ${v.border}` }}
                             title={`${a.customerName} - ${a.service?.name}`}
                           >
@@ -1278,6 +1431,7 @@ function WeekView({
   onDragEnd,
   hasConflict,
   onDropDay,
+  availabilities = [],
 }: CalendarViewProps) {
   const start = new Date(date)
   start.setDate(date.getDate() - date.getDay())
@@ -1286,12 +1440,31 @@ function WeekView({
     d.setDate(start.getDate() + i)
     return d
   })
-  const hours = Array.from({ length: 12 }, (_, i) => i + 8) // 8am-7pm
+  // Rango horario dinámico: cubre disponibilidad del negocio y horas con citas,
+  // con piso 8 y techo 19 como valores por defecto.
+  const hours = useMemo(() => {
+    let minH = 8
+    let maxH = 19
+    for (const av of availabilities) {
+      const sh = parseInt(av.startTime.split(':')[0], 10)
+      const eh = parseInt(av.endTime.split(':')[0], 10)
+      if (!Number.isNaN(sh)) minH = Math.min(minH, sh)
+      if (!Number.isNaN(eh)) maxH = Math.max(maxH, eh)
+    }
+    for (const a of appointments) {
+      const h = new Date(a.date).getHours()
+      minH = Math.min(minH, h)
+      maxH = Math.max(maxH, h)
+    }
+    minH = Math.max(0, minH)
+    maxH = Math.min(23, Math.max(maxH, minH + 5))
+    return Array.from({ length: maxH - minH + 1 }, (_, i) => minH + i)
+  }, [availabilities, appointments])
   const [overKey, setOverKey] = useState<string | null>(null)
   const [conflictKey, setConflictKey] = useState<string | null>(null)
 
-  const apptAt = (d: Date, h: number) => {
-    return appointments.find((a) => {
+  const apptsAt = (d: Date, h: number) => {
+    return appointments.filter((a) => {
       const ad = new Date(a.date)
       return ad.toDateString() === d.toDateString() && ad.getHours() === h
     })
@@ -1312,7 +1485,7 @@ function WeekView({
   }
 
   return (
-    <Card>
+    <Card className="border-primary/20 shadow-sm">
       <CardContent className="p-2 sm:p-4 overflow-x-auto">
         <div className="min-w-[700px]">
           <div className="grid grid-cols-8 gap-1 mb-1">
@@ -1338,14 +1511,15 @@ function WeekView({
                 {h}:00
               </div>
               {weekDays.map((d, di) => {
-                const appt = apptAt(d, h)
+                const appts = apptsAt(d, h)
+                const hasAppt = appts.length > 0
                 const key = `${dayKey(d)}T${h}`
                 const isOver = dragId && overKey === key
                 const isConflict = isOver && conflictKey === key
                 return (
                   <div
                     key={di}
-                    onClick={() => !appt && !isOver && onEmptySlot(d, h)}
+                    onClick={() => !hasAppt && !isOver && onEmptySlot(d, h)}
                     onDragOver={(e) => handleDragOver(e, d, h, key)}
                     onDragLeave={() => setOverKey((k) => (k === key ? null : k))}
                     onDrop={(e) => {
@@ -1355,8 +1529,8 @@ function WeekView({
                       onDropDay(d, h)
                     }}
                     className={`min-h-12 border border-border rounded text-xs p-1 transition-colors ${
-                      appt ? 'cursor-pointer' : ''
-                    } ${!appt && dragId ? 'cursor-copy' : ''} ${
+                      hasAppt ? 'cursor-pointer' : ''
+                    } ${!hasAppt && dragId ? 'cursor-copy' : ''} ${
                       isConflict
                         ? 'ring-2 ring-red-500 bg-red-100'
                         : isOver
@@ -1364,33 +1538,42 @@ function WeekView({
                           : ''
                     }`}
                   >
-                    {appt && (
-                      (() => {
-                        const v = apptVisual(appt, services)
-                        return (
-                          <div
-                            className="h-full truncate rounded p-0.5"
-                            style={{ background: v.bg, color: v.fg, borderLeft: `3px solid ${v.border}` }}
-                            draggable
-                            onDragStart={(e) => {
-                              e.dataTransfer.effectAllowed = 'move'
-                              onDragStart(appt.id)
-                            }}
-                            onDragEnd={onDragEnd}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              onSlotClick(appt)
-                            }}
-                          >
-                            <div className={`font-medium truncate ${v.lineThrough ? 'line-through' : ''}`}>
-                              {appt.customerName}
+                    {hasAppt && (
+                      <div className="space-y-0.5">
+                        {appts.slice(0, 3).map((appt) => {
+                          const v = apptVisual(appt, services)
+                          return (
+                            <div
+                              key={appt.id}
+                              className="h-full truncate rounded p-0.5"
+                              style={{ background: v.bg, color: v.fg, borderLeft: `3px solid ${v.border}` }}
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.effectAllowed = 'move'
+                                onDragStart(appt.id)
+                              }}
+                              onDragEnd={onDragEnd}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                onSlotClick(appt)
+                              }}
+                            >
+                              <div className={`font-medium truncate ${v.lineThrough ? 'line-through' : ''}`}>
+                                {appt.customerName}
+                                <span className="ml-1 text-[10px] opacity-70">
+                                  {new Date(appt.date).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                              <div className="text-[10px] opacity-80 truncate">
+                                {appt.service?.name}
+                              </div>
                             </div>
-                            <div className="text-[10px] opacity-80 truncate">
-                              {appt.service?.name}
-                            </div>
-                          </div>
-                        )
-                      })()
+                          )
+                        })}
+                        {appts.length > 3 && (
+                          <div className="text-[9px] text-muted-foreground text-center">+{appts.length - 3} más</div>
+                        )}
+                      </div>
                     )}
                   </div>
                 )
@@ -1446,12 +1629,12 @@ function DayView({
           setConflict(false)
           onDropDay(date)
         }}
-        className={`${over ? (conflict ? 'ring-2 ring-red-500 bg-red-100' : 'ring-2 ring-primary/60 bg-primary/10') : ''} transition-colors`}
+        className={`border-primary/20 shadow-sm transition-colors ${over ? (conflict ? 'ring-2 ring-red-500 bg-red-100' : 'ring-2 ring-primary/60 bg-primary/10') : ''}`}
       >
         <CardContent className="p-4">
           {dayAppts.length === 0 ? (
             <div className="py-12 text-center text-muted-foreground">
-              No hay citas programadas para este día. Haz clic en un hueco vacío para agendar.
+              No hay citas programadas para este día. Usa «Agendar en este día» para crear una.
             </div>
           ) : (
             <div className="space-y-2">
@@ -1899,13 +2082,18 @@ function LicenseTab({
   license,
   supportPhone,
   businessId,
+  certified,
+  certPrice,
 }: {
   license: Business['license']
   supportPhone: string | null
   businessId: string
+  certified?: boolean
+  certPrice: number
 }) {
   const [plans, setPlans] = useState<Plan[] | null>(null)
   const [payingPlanId, setPayingPlanId] = useState<string | null>(null)
+  const [requestingCert, setRequestingCert] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -1956,6 +2144,42 @@ Utilizo este código para realizar el pago. ¡Gracias!`
       toast.error(e.message || 'Error al generar el código de pago')
     } finally {
       setPayingPlanId(null)
+    }
+  }
+
+  // Solicitud de certificación: genera un código de pago (kind: certificacion)
+  // y abre WhatsApp del asesor, igual que con los planes.
+  const handleRequestCert = async () => {
+    if (!supportPhone) {
+      toast.error('Aún no hay teléfono de soporte configurado. Contacta al administrador.')
+      return
+    }
+    if (requestingCert) return
+    setRequestingCert(true)
+    try {
+      const res = await fetch('/api/owner/payment-codes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ businessId, kind: 'certificacion' }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'No se pudo generar el código')
+      const text = `✅ *SOLICITUD DE CERTIFICACIÓN*
+
+Hola, quiero certificar mi negocio en AgendaT.
+💰 Precio: $${data.price} CUP
+🔑 Mi código de pago: *${data.code}*
+
+Utilizo este código para realizar el pago de la certificación. ¡Gracias!`
+      const digits = supportPhone.replace(/[^0-9]/g, '')
+      window.open(`https://wa.me/${digits}?text=${encodeURIComponent(text)}`, '_blank')
+      toast.success(`Código de pago generado: ${data.code}`, {
+        description: 'Se abrió WhatsApp con el mensaje para el asesor. Guarda tu código.',
+      })
+    } catch (e: any) {
+      toast.error(e.message || 'Error al solicitar la certificación')
+    } finally {
+      setRequestingCert(false)
     }
   }
 
@@ -2021,6 +2245,50 @@ Utilizo este código para realizar el pago. ¡Gracias!`
           </CardContent>
         </Card>
       )}
+
+      {/* Certificación del negocio (marca de verificado junto al nombre) */}
+      <Card className={certified ? 'border-blue-500/40' : ''}>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2">
+            <BadgeCheck className="h-5 w-5 text-blue-500" />Certificación
+          </CardTitle>
+          <CardDescription>
+            Obtén la marca de verificado junto al nombre de tu negocio en el catálogo
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex items-center justify-between gap-3 flex-wrap">
+          {certified ? (
+            <div className="flex items-center gap-2">
+              <VerifiedBadge className="h-6 w-6" />
+              <div>
+                <div className="font-semibold text-sm">Negocio certificado</div>
+                <div className="text-xs text-muted-foreground">
+                  Tu negocio muestra la marca de verificado.
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div>
+              {certPrice > 0 ? (
+                <div className="text-2xl font-bold text-primary">
+                  ${certPrice.toLocaleString('es-ES')}
+                  <span className="text-sm font-normal text-muted-foreground ml-1">CUP</span>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  La certificación aún no está disponible. Contacta al soporte.
+                </p>
+              )}
+            </div>
+          )}
+          {!certified && certPrice > 0 && (
+            <Button size="sm" onClick={handleRequestCert} disabled={requestingCert}>
+              <BadgeCheck className="h-4 w-4 mr-1" />
+              {requestingCert ? 'Generando código...' : 'Solicitar certificación'}
+            </Button>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Ofertas / planes de suscripción (precios los define el admin) */}
       <Card>
@@ -2431,6 +2699,7 @@ function SettingsTab({
   const set = (key: keyof Business, value: any) => onChange({ ...form, [key]: value })
 
   return (
+    <div className="space-y-4">
     <Card>
       <CardHeader>
         <CardTitle>Editar negocio</CardTitle>
@@ -2525,5 +2794,52 @@ function SettingsTab({
         </Button>
       </CardContent>
     </Card>
+
+    {/* Depósito por cita (opcional, configurable por el negocio) */}
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <DollarSign className="h-5 w-5 text-primary" />Depósito por cita
+        </CardTitle>
+        <CardDescription>
+          Si lo activas, tus citas quedan pendientes hasta que el cliente abone el depósito
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+          <div className="space-y-0.5">
+            <Label>Exigir depósito para confirmar la cita</Label>
+            <p className="text-xs text-muted-foreground">
+              El cliente verá el monto requerido al agendar en tu página pública.
+            </p>
+          </div>
+          <Switch
+            checked={!!form.depositEnabled}
+            onCheckedChange={(v) => set('depositEnabled', v)}
+          />
+        </div>
+        {form.depositEnabled && (
+          <div className="space-y-1.5 max-w-xs">
+            <Label>Monto del depósito (CUP)</Label>
+            <Input
+              inputMode="decimal"
+              value={String(form.depositAmount ?? 0)}
+              onChange={(e) =>
+                set('depositAmount', Number(e.target.value.replace(/[^0-9.]/g, '')) || 0)
+              }
+              placeholder="Ej. 200"
+            />
+            <p className="text-xs text-muted-foreground">
+              El método de pago lo acuerdas con el cliente. Cuando lo recibas, marcas
+              «Depósito recibido» en la cita y esta se confirma automáticamente.
+            </p>
+          </div>
+        )}
+        <Button onClick={onSave}>
+          <Save className="h-4 w-4 mr-2" />Guardar cambios
+        </Button>
+      </CardContent>
+    </Card>
+    </div>
   )
 }

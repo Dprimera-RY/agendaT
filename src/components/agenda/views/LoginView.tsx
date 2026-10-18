@@ -29,7 +29,13 @@ export function LoginView() {
     setLoading(false)
 
     if (!result.ok) {
-      toast.error('Usuario o contraseña incorrectos')
+      if (result.needsVerification) {
+        if (result.email) sessionStorage.setItem('agenda_verify_email', result.email)
+        toast.error(result.error || 'Tu correo no está verificado')
+        navigate('/verificar-email')
+        return
+      }
+      toast.error(result.error || 'Usuario o contraseña incorrectos')
       return
     }
     toast.success(`Bienvenido/a!`)
@@ -80,17 +86,26 @@ export function LoginView() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••"
                 />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="absolute right-1 top-1 h-7 w-7 p-0"
-                  onClick={() => setShowPwd((s) => !s)}
-                  tabIndex={-1}
-                >
-                  {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="absolute right-1 top-1 h-7 w-7 p-0"
+                onClick={() => setShowPwd((s) => !s)}
+                tabIndex={-1}
+              >
+                {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </Button>
+            </div>
+            <div className="text-right">
+              <button
+                type="button"
+                onClick={() => navigate('/forgot-password')}
+                className="text-xs text-muted-foreground hover:text-primary underline underline-offset-2"
+              >
+                ¿Olvidaste tu contraseña?
+              </button>
+            </div>
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? 'Entrando...' : 'Entrar'}
@@ -109,13 +124,6 @@ export function LoginView() {
             </Button>
           </div>
 
-          <div className="mt-6 pt-4 border-t text-xs text-muted-foreground space-y-1">
-            <p className="font-medium">Usuarios de prueba:</p>
-            <p>• Admin: <code className="bg-muted px-1 rounded">root / 123</code></p>
-            <p>• Dueño: <code className="bg-muted px-1 rounded">estudio_aura / aura123</code></p>
-            <p>• Dueño: <code className="bg-muted px-1 rounded">kings_barber / kings123</code></p>
-            <p>• Dueño: <code className="bg-muted px-1 rounded">glamour_hair / glamour123</code></p>
-          </div>
         </CardContent>
       </Card>
     </div>

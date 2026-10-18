@@ -26,7 +26,17 @@ export async function PATCH(req: NextRequest) {
         { status: 400 }
       )
     }
-    const allowed = ['supportPhone']
+    const allowed = [
+      'supportPhone',
+      'certificationPrice',
+      'trialDaysFirst',
+      'trialDaysExtra',
+      'smtpHost',
+      'smtpPort',
+      'smtpUser',
+      'smtpPass',
+      'smtpFrom',
+    ]
     if (!allowed.includes(key)) {
       return NextResponse.json({ error: 'Clave no permitida' }, { status: 400 })
     }

@@ -1,13 +1,14 @@
 'use client'
 
 import { useState } from 'react'
-import { ArrowLeft, Eye, EyeOff, UserPlus, Check } from 'lucide-react'
+import { ArrowLeft, Eye, EyeOff, UserPlus, Check, MailCheck } from 'lucide-react'
 import { useRouterStore } from '@/lib/stores/router-store'
 import { useAuth } from '@/lib/stores/auth-store'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { toast } from 'sonner'
 
 export function RegisterView() {
@@ -21,6 +22,7 @@ export function RegisterView() {
     password: '',
     email: '',
     phone: '',
+    terms: false,
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -33,21 +35,34 @@ export function RegisterView() {
       toast.error('La contraseña debe tener al menos 4 caracteres')
       return
     }
+    if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) {
+      toast.error('Debes indicar un email válido para verificar tu identidad')
+      return
+    }
+    if (!form.terms) {
+      toast.error('Debes aceptar los Términos y Condiciones y el Uso de Datos')
+      return
+    }
     setLoading(true)
     const result = await register(form)
     setLoading(false)
 
     if (!result.ok) {
-      toast.error('No se pudo registrar. Es posible que el usuario ya exista.')
+      toast.error(result.error || 'No se pudo registrar. Es posible que el usuario ya exista.')
+      return
+    }
+    if (result.needsVerification) {
+      sessionStorage.setItem('agenda_verify_email', result.email || form.email.trim())
+      toast.info('Te enviamos un código de verificación a tu email', {
+        description: result.sent
+          ? 'Revisa tu bandeja de entrada (y spam).'
+          : 'Si no llega el correo, pide verificación al administrador.',
+      })
+      navigate('/verificar-email')
       return
     }
     toast.success('¡Cuenta creada! Ahora crea tu negocio.')
-    // El redirect va a /crear-negocio
-    if (result.redirect) {
-      navigate(result.redirect)
-    } else {
-      navigate('/crear-negocio')
-    }
+    navigate(result.redirect || '/crear-negocio')
   }
 
   const slugify = (s: string) =>
@@ -136,14 +151,46 @@ export function RegisterView() {
               </p>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">Email *</Label>
               <Input
                 id="email"
                 type="email"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
                 placeholder="tu@email.com"
+                required
               />
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <MailCheck className="h-3.5 w-3.5 shrink-0" />
+                Verificaremos tu identidad con un código que te enviaremos a este email
+              </p>
+            </div>
+            <div className="flex items-start gap-2 rounded-lg border p-3 bg-muted/30">
+              <Checkbox
+                id="terms"
+                checked={form.terms}
+                onCheckedChange={(v) => setForm({ ...form, terms: v === true })}
+                className="mt-0.5"
+              />
+              <Label htmlFor="terms" className="text-xs font-normal leading-snug cursor-pointer">
+                He leído y acepto los{' '}
+                <button
+                  type="button"
+                  onClick={() => navigate('/terminos')}
+                  className="text-primary underline underline-offset-2 font-medium"
+                >
+                  Términos y Condiciones
+                </button>{' '}
+                y el{' '}
+                <button
+                  type="button"
+                  onClick={() => navigate('/terminos')}
+                  className="text-primary underline underline-offset-2 font-medium"
+                >
+                  Uso de Datos
+                </button>{' '}
+                del sistema AgendaT *
+              </Label>
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? 'Creando cuenta...' : 'Crear cuenta'}

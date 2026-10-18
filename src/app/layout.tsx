@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
@@ -19,9 +19,28 @@ export const metadata: Metadata = {
   description: "Plataforma de gestión de citas para múltiples negocios. Reserva, gestiona disponibilidad y controla tu agenda en un solo lugar.",
   keywords: ["citas", "agenda", "reservas", "negocios", "multi-negocio"],
   authors: [{ name: "AgendaT" }],
-  icons: {
-    icon: "./logo.png",
+  manifest: "./manifest.json",
+  applicationName: "AgendaT",
+  appleWebApp: {
+    capable: true,
+    title: "AgendaT",
+    statusBarStyle: "default",
   },
+  icons: {
+    icon: [
+      { url: "./logo.png", sizes: "any", type: "image/png" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+};
+
+// PWA: color de la barra del navegador/app instalada
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#18181b",
 };
 
 export default function RootLayout({

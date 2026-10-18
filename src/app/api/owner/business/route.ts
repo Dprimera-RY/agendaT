@@ -47,6 +47,8 @@ export async function PATCH(req: NextRequest) {
       province,
       phone,
       email,
+      depositEnabled,
+      depositAmount,
     } = data
 
     if (!businessId) {
@@ -82,6 +84,8 @@ export async function PATCH(req: NextRequest) {
         ...(province !== undefined && { province: province || null }),
         ...(phone !== undefined && { phone }),
         ...(email !== undefined && { email }),
+        ...(depositEnabled !== undefined && typeof depositEnabled === 'boolean' && { depositEnabled }),
+        ...(depositAmount !== undefined && typeof depositAmount === 'number' && depositAmount >= 0 && { depositAmount }),
       },
     })
     return NextResponse.json(updated)

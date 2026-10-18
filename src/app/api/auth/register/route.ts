@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { setSession } from '@/lib/auth'
+import { createOtp } from '@/lib/otp'
+import { sendOtpEmail } from '@/lib/mailer'
 
 // REGISTRO de un nuevo dueño de negocio
+// Requiere email real + aceptar términos. NO crea sesión: hasta que el email
+// no se verifique con el código OTP, la cuenta no puede usarse.
 export async function POST(req: NextRequest) {
   try {
-    const { name, username, password, email, phone } = await req.json()
+    const { name, username, password, email, phone, terms } = await req.json()
 
     if (!name || !username || !password) {
       return NextResponse.json(
@@ -16,6 +19,18 @@ export async function POST(req: NextRequest) {
     if (password.length < 4) {
       return NextResponse.json(
         { error: 'La contraseña debe tener al menos 4 caracteres' },
+        { status: 400 }
+      )
+    }
+    if (!email || typeof email !== 'string' || !/^\S+@\S+\.\S+$/.test(email.trim())) {
+      return NextResponse.json(
+        { error: 'Debes indicar un email válido: se usará para verificar tu identidad' },
+        { status: 400 }
+      )
+    }
+    if (terms !== true) {
+      return NextResponse.json(
+        { error: 'Debes aceptar los Términos y Condiciones y el Uso de Datos' },
         { status: 400 }
       )
     }
@@ -32,30 +47,24 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const cleanEmail = email.trim().toLowerCase()
     const owner = await db.businessOwner.create({
       data: {
         name,
         username,
         password,
-        email,
+        email: cleanEmail,
         phone,
+        emailVerified: false,
       },
     })
 
-    await setSession({
-      role: 'owner',
-      ownerId: owner.id,
-      name: owner.name,
-      username: owner.username,
-    })
+    // Código OTP de 6 dígitos enviado a su email
+    const otp = await createOtp(cleanEmail, 'register', owner.id)
+    const sent = await sendOtpEmail(cleanEmail, otp.code, 'register')
 
     return NextResponse.json(
-      {
-        role: 'owner',
-        name: owner.name,
-        username: owner.username,
-        redirect: '/crear-negocio',
-      },
+      { needsVerification: true, email: cleanEmail, sent },
       { status: 201 }
     )
   } catch (e: any) {

@@ -11,6 +11,16 @@ export interface Session {
   businesses?: Array<{ id: string; slug: string; name: string }>
 }
 
+export interface AuthResult {
+  ok: boolean
+  redirect?: string
+  role?: string
+  error?: string
+  needsVerification?: boolean
+  email?: string
+  sent?: boolean
+}
+
 interface AuthState {
   session: Session
   loading: boolean
@@ -18,16 +28,32 @@ interface AuthState {
   setLoading: (b: boolean) => void
   fetchMe: () => Promise<void>
   // Login unificado: detecta rol automáticamente
-  login: (username: string, password: string) => Promise<{ ok: boolean; redirect?: string; role?: string }>
-  // Registro de nuevo dueño
+  login: (username: string, password: string) => Promise<AuthResult>
+  // Registro de nuevo dueño (requiere verificación OTP por email)
   register: (data: {
     name: string
     username: string
     password: string
-    email?: string
+    email: string
     phone?: string
-  }) => Promise<{ ok: boolean; redirect?: string }>
+    terms: boolean
+  }) => Promise<AuthResult>
+  // Verificación OTP: activa la cuenta y crea la sesión
+  verifyEmail: (email: string, code: string) => Promise<AuthResult>
+  resendOtp: (email: string, purpose?: 'register' | 'reset') => Promise<AuthResult>
+  forgotPassword: (email: string) => Promise<AuthResult>
+  resetPassword: (email: string, code: string, password: string) => Promise<AuthResult>
   logout: () => Promise<void>
+}
+
+// Sincroniza el estado local con la cookie de sesión del servidor
+async function syncSession(set: (s: Partial<AuthState>) => void) {
+  try {
+    const meRes = await fetch('/api/auth/me')
+    set({ session: await meRes.json() })
+  } catch {
+    // sin sesión
+  }
 }
 
 export const useAuth = create<AuthState>((set) => ({
@@ -54,12 +80,14 @@ export const useAuth = create<AuthState>((set) => ({
       })
       const data = await res.json()
       if (!res.ok) {
-        return { ok: false }
+        return {
+          ok: false,
+          error: data.error,
+          needsVerification: data.needsVerification,
+          email: data.email,
+        }
       }
-      // Volver a cargar la sesión completa (incluye businesses)
-      const meRes = await fetch('/api/auth/me')
-      const meData = await meRes.json()
-      set({ session: meData })
+      await syncSession(set)
       return { ok: true, redirect: data.redirect, role: data.role }
     } catch {
       return { ok: false }
@@ -74,13 +102,71 @@ export const useAuth = create<AuthState>((set) => ({
       })
       const result = await res.json()
       if (!res.ok) {
-        return { ok: false }
+        return { ok: false, error: result.error }
       }
-      // El backend ya hizo setSession, ahora sincronizamos el frontend
-      const meRes = await fetch('/api/auth/me')
-      const meData = await meRes.json()
-      set({ session: meData })
+      if (result.needsVerification) {
+        return { ok: true, needsVerification: true, email: result.email, sent: result.sent }
+      }
+      await syncSession(set)
       return { ok: true, redirect: result.redirect }
+    } catch {
+      return { ok: false }
+    }
+  },
+  verifyEmail: async (email, code) => {
+    try {
+      const res = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code }),
+      })
+      const data = await res.json()
+      if (!res.ok) return { ok: false, error: data.error }
+      await syncSession(set)
+      return { ok: true, redirect: data.redirect, role: data.role }
+    } catch {
+      return { ok: false }
+    }
+  },
+  resendOtp: async (email, purpose = 'register') => {
+    try {
+      const res = await fetch('/api/auth/resend-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, purpose }),
+      })
+      const data = await res.json()
+      if (!res.ok) return { ok: false, error: data.error }
+      return { ok: true, sent: data.sent }
+    } catch {
+      return { ok: false }
+    }
+  },
+  forgotPassword: async (email) => {
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+      const data = await res.json()
+      if (!res.ok) return { ok: false, error: data.error }
+      return { ok: true, sent: data.sent }
+    } catch {
+      return { ok: false }
+    }
+  },
+  resetPassword: async (email, code, password) => {
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code, password }),
+      })
+      const data = await res.json()
+      if (!res.ok) return { ok: false, error: data.error }
+      await syncSession(set)
+      return { ok: true, redirect: data.redirect }
     } catch {
       return { ok: false }
     }

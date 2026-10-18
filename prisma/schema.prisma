@@ -23,16 +23,33 @@ model Admin {
 }
 
 model BusinessOwner {
-  id        String   @id @default(cuid())
-  username  String   @unique
-  password  String
-  name      String
-  email     String?
-  phone     String? // WhatsApp del dueño
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String    @id @default(cuid())
+  username        String    @unique
+  password        String
+  name            String
+  email           String?
+  phone           String? // WhatsApp del dueño
+  emailVerified   Boolean   @default(false) // verificación de identidad por email (OTP)
+  emailVerifiedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   businesses Business[]
+}
+
+// Códigos OTP de verificación de email (registro y recuperación de contraseña)
+model EmailOtp {
+  id        String   @id @default(cuid())
+  email     String
+  code      String // 6 dígitos
+  purpose   String // register | reset
+  ownerId   String? // dueño asociado (si aplica)
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([email, purpose])
 }
 
 // ============================================================
@@ -65,6 +82,10 @@ model Business {
   email     String?
   ownerId   String
   categoryId String
+  certified  Boolean  @default(false) // certificación verificada (marca junto al nombre)
+  certifiedAt DateTime?
+  depositEnabled Boolean @default(false) // el negocio exige depósito para confirmar cita
+  depositAmount  Float   @default(0) // monto del depósito (CUP)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -132,6 +153,7 @@ model Plan {
 
 // Código de pago de 6 dígitos que genera el dueño al elegir un plan;
 // el asesor (admin) lo utiliza para aplicar el pago de la suscripción.
+// kind: "plan" (renueva licencia) | "certificacion" (certifica el negocio).
 model PaymentCode {
   id           String   @id @default(cuid())
   code         String   @unique // 6 dígitos
@@ -140,6 +162,7 @@ model PaymentCode {
   planName     String   // nombre del plan al momento de generar (referencia)
   price        Int      // precio en CUP al momento de generar
   durationDays Int
+  kind         String   @default("plan") // plan | certificacion
   status       String   @default("pendiente") // pendiente | pagada | rechazada
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
