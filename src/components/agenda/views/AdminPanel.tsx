@@ -309,6 +309,11 @@ export function AdminPanel() {
   const [newPwd, setNewPwd] = useState('')
   const [savingPwd, setSavingPwd] = useState(false)
 
+  // Editar datos de un dueño existente
+  const [editOwner, setEditOwner] = useState<Owner | null>(null)
+  const [editOwnerForm, setEditOwnerForm] = useState({ name: '', username: '', email: '', phone: '' })
+  const [savingEditOwner, setSavingEditOwner] = useState(false)
+
   // Correo SMTP (envío de códigos OTP de verificación y recuperación)
   const [smtpHost, setSmtpHost] = useState('')
   const [smtpPort, setSmtpPort] = useState('465')
@@ -563,6 +568,42 @@ export function AdminPanel() {
       toast.error(e.message || 'Error al actualizar la contraseña')
     } finally {
       setSavingPwd(false)
+    }
+  }
+
+  // Editar datos de un dueño (nombre, usuario, email, teléfono)
+  const openEditOwner = (o: Owner) => {
+    setEditOwner(o)
+    setEditOwnerForm({
+      name: o.name,
+      username: o.username,
+      email: o.email || '',
+      phone: o.phone || '',
+    })
+  }
+
+  const saveEditOwner = async () => {
+    if (!editOwner) return
+    if (!editOwnerForm.name.trim() || !editOwnerForm.username.trim()) {
+      toast.error('Nombre y usuario son obligatorios')
+      return
+    }
+    setSavingEditOwner(true)
+    try {
+      const res = await fetch('/api/admin/owners', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: editOwner.id, ...editOwnerForm }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success('Datos del dueño actualizados')
+      setEditOwner(null)
+      await loadAll()
+    } catch (e: any) {
+      toast.error(e.message || 'Error al guardar')
+    } finally {
+      setSavingEditOwner(false)
     }
   }
 
@@ -1429,7 +1470,7 @@ export function AdminPanel() {
                     {o.phone && <div>📞 {o.phone}</div>}
                     <div>📅 {new Date(o.createdAt).toLocaleDateString('es-ES')}</div>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
                     {!o.emailVerified && (
                       <Button
                         size="sm"
@@ -1440,6 +1481,14 @@ export function AdminPanel() {
                         <UserCheck className="h-4 w-4 mr-1" />Verificar
                       </Button>
                     )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => openEditOwner(o)}
+                    >
+                      <Pencil className="h-4 w-4 mr-1" />Editar
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline"
@@ -2098,6 +2147,56 @@ export function AdminPanel() {
             </Button>
             <Button onClick={changeOwnerPassword} disabled={savingPwd || newPwd.length < 4}>
               {savingPwd ? 'Guardando...' : 'Guardar contraseña'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: editar datos de un dueño */}
+      <Dialog open={!!editOwner} onOpenChange={(o) => { if (!o) setEditOwner(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar dueño</DialogTitle>
+            <DialogDescription>
+              Actualiza los datos de la cuenta del dueño
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Nombre</Label>
+              <Input
+                value={editOwnerForm.name}
+                onChange={(e) => setEditOwnerForm({ ...editOwnerForm, name: e.target.value })}
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Usuario</Label>
+              <Input
+                value={editOwnerForm.username}
+                onChange={(e) => setEditOwnerForm({ ...editOwnerForm, username: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Email</Label>
+              <Input
+                type="email"
+                value={editOwnerForm.email}
+                onChange={(e) => setEditOwnerForm({ ...editOwnerForm, email: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Teléfono/WhatsApp</Label>
+              <Input
+                value={editOwnerForm.phone}
+                onChange={(e) => setEditOwnerForm({ ...editOwnerForm, phone: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOwner(null)}>Cancelar</Button>
+            <Button onClick={saveEditOwner} disabled={savingEditOwner}>
+              {savingEditOwner ? 'Guardando...' : 'Guardar cambios'}
             </Button>
           </DialogFooter>
         </DialogContent>

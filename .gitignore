@@ -52,3 +52,9 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# Base de datos local (la de producción vive en el servidor; no commitear)
+/db/custom.db
+
+# Imágenes subidas en runtime (viven en el servidor; no commitear)
+/uploads/

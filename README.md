@@ -90,8 +90,9 @@ src/
 │   ├── db.ts  auth.ts  otp.ts  mailer.ts  push.ts  whatsapp.ts  datetime.ts
 │   └── stores/                  # zustand: router, auth, datos
 prisma/schema.prisma             # modelo de datos (SQLite)
-db/custom.db                     # base de datos (trackeada en git)
-public/                          # sw.js, manifest.json, iconos, uploads/
+db/custom.db                     # base de datos (NO trackeada en git)
+public/                          # sw.js, manifest.json, iconos, uploads/ antiguos
+uploads/                         # imágenes subidas en runtime (NO trackeada)
 scripts/seed.ts                  # seed inicial (upserts, seguro re-ejecutar)
 tests/*.sh                       # harnesses de deploy (bash, bun falso)
 .zscripts/dev.sh                 # arranque completo del entorno
@@ -128,7 +129,7 @@ DATABASE_URL=file:../db/custom.db   # RELATIVA (se resuelve contra prisma/); no 
 ```
 
 - `src/lib/db.ts` normaliza `DATABASE_URL` a absoluta contra `<raíz>/db/custom.db` para que dev/standalone/otras máquinas usen siempre esa ruta.
-- **SQLite `db/custom.db` está commiteado en git** (junto con `.env`).
+- **SQLite `db/custom.db` NO está commiteado** (`.gitignore`); el archivo local se conserva. Solo `.env` queda trackeado.
 - SMTP se configura **desde el panel Admin → SMTP** (no en `.env`). Plantilla Gmail: `smtp.gmail.com:465`, SSL, usuario `tu@gmail.com`, contraseña de aplicación. Sin SMTP, los OTP se crean en DB y el admin puede verificar manualmente.
 
 ## Seed / credenciales

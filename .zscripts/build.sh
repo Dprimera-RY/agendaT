@@ -135,6 +135,14 @@ if [ -d "public" ]; then
     cp -r public "$BUILD_DIR/next-service-dist/"
 fi
 
+# 复制 uploads 目录（运行时上传的图片，服务端 /uploads/* 路由从这里读取）
+if [ -d "uploads" ]; then
+    echo "  - 复制 uploads"
+    cp -r uploads "$BUILD_DIR/next-service-dist/"
+else
+    echo "ℹ️  uploads 目录不存在，跳过"
+fi
+
 # Python 不继承 workspace-agent 的 /home/z/.venv。若项目包含 Python 源码或
 # 依赖清单，在构建期将生产依赖固化到产物，并保持 Python 源码的项目相对路径。
 PROJECT_DIR="$NEXTJS_PROJECT_DIR" BUILD_DIR="$BUILD_DIR" \

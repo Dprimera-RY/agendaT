@@ -3,12 +3,14 @@ import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import crypto from 'crypto'
 import { getSession } from '@/lib/auth'
+import { uploadsDir } from '@/lib/uploads'
 
 // Subida de imágenes de negocio (logo + 3 fotos) al servidor.
-// - Con businessId + slot (logo|img1|img2|img3): nombre fijo => se sobreescriben
-//   al cambiar la foto (máximo 4 imágenes por tienda).
-// - Sin businessId: nombre aleatorio (subida previa a la creación del negocio).
-// Archivos en public/uploads/ (servidos como /uploads/... en dev y deploy).
+// Los archivos se guardan en uploads/ (raíz del proyecto, fuera de public/)
+// y se sirven en /uploads/... vía src/app/uploads/[...path]/route.ts.
+// Nombre siempre único (timestamp + aleatorio): nunca se sobreescribe un
+// archivo existente; la URL anterior queda en disco y en la DB hasta que
+// el dueño guarda la nueva foto.
 const SLOTS = ['logo', 'img1', 'img2', 'img3']
 const MAX_SIZE = 5 * 1024 * 1024 // 5 MB
 const ALLOWED: Record<string, string> = {
@@ -44,15 +46,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Imagen demasiado grande (máx. 5 MB)' }, { status: 400 })
     }
 
-    let filename: string
-    if (typeof businessId === 'string' && businessId && typeof slot === 'string' && SLOTS.includes(slot)) {
-      // Sobrescribe la foto anterior del mismo slot (4 fotos por tienda)
-      filename = `${businessId.replace(/[^a-zA-Z0-9_-]/g, '')}-${slot}.${ALLOWED[file.type]}`
-    } else {
-      filename = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ALLOWED[file.type]}`
-    }
+    // Prefijo opcional con businessId-slot para depurar, pero siempre con
+    // sufijo único para no sobreescribir imágenes existentes.
+    const prefix =
+      typeof businessId === 'string' && businessId && typeof slot === 'string' && SLOTS.includes(slot)
+        ? `${businessId.replace(/[^a-zA-Z0-9_-]/g, '')}-${slot}-`
+        : ''
+    const filename = `${prefix}${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ALLOWED[file.type]}`
 
-    const dir = path.join(process.cwd(), 'public', 'uploads')
+    const dir = uploadsDir()
     await mkdir(dir, { recursive: true })
     const buffer = Buffer.from(await file.arrayBuffer())
     await writeFile(path.join(dir, filename), buffer)

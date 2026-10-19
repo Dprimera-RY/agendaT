@@ -33,7 +33,7 @@ bun run db:generate
 
 ## Base de datos
 
-- SQLite en `db/custom.db`, **commiteado en git**. `.env` (también trackeado) contiene `DATABASE_URL=file:/ruta/absoluta/a/custom.db`: es una ruta de esta máquina; si falla, apunta al `db/custom.db` local.
+- SQLite en `db/custom.db`, **ya NO commiteado** (`.gitignore` + `git rm --cached` hecho; el archivo local se conserva). `.env` (también trackeado) contiene `DATABASE_URL=file:/ruta/absoluta/a/custom.db`: es una ruta de esta máquina; si falla, apunta al `db/custom.db` local. Imágenes subidas: `uploads/` en la raíz (gitignored), servidas por `src/app/uploads/[...path]/route.ts`; las antiguas de `public/uploads` siguen sirviéndose estáticamente.
 - **No existe `prisma/migrations`**: los cambios de schema van con `bun run db:push` (acepta pérdida de datos). Después de tocar `prisma/schema.prisma`, corre `bun run db:generate`.
 
 ## Auth
