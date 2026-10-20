@@ -26,7 +26,9 @@ function parseHash(hash: string): Route {
 }
 
 export const useRouterStore = create<RouterState>((set, get) => ({
-  route: parseHash(typeof window !== 'undefined' ? window.location.hash : ''),
+  // Estado inicial SIEMPRE '/' (igual que el HTML del servidor) para evitar
+  // hydration mismatch: el hash real se aplica en initRouter() tras el montaje.
+  route: { path: '/', params: {} },
   navigate: (path) => {
     const hashPath = '#' + path
     if (typeof window !== 'undefined') {
@@ -56,6 +58,8 @@ export function initRouter() {
   if (!window.location.hash) {
     window.location.hash = '#/'
   }
+  // Aplicar el hash actual de inmediato (deep links: #/login, #/negocio/..., etc.)
+  handler()
 }
 
 // Helpers de matching de rutas

@@ -70,6 +70,14 @@ interface Owner {
   _count?: { businesses: number }
 }
 
+interface AdminUser {
+  id: string
+  username: string
+  name: string
+  createdAt: string
+  updatedAt: string
+}
+
 interface AdminBusiness {
   id: string
   slug: string
@@ -199,6 +207,54 @@ const ICON_SUGGESTIONS = [
   'Camera',
   'Heart',
   'Gem',
+  'ShoppingBag',
+  'Cpu',
+  'GraduationCap',
+  'Music',
+  'Plane',
+  'BookOpen',
+  'Dumbbell',
+  'Car',
+  'Pizza',
+  'Coffee',
+  'House',
+  'Laptop',
+  'Smartphone',
+  'Shirt',
+  'Baby',
+  'Palette',
+  'Pill',
+  'Stethoscope',
+  'Paintbrush',
+  'Hammer',
+  'Bike',
+  'Train',
+  'Ship',
+  'Store',
+  'Salad',
+  'Cake',
+  'IceCream',
+  'GlassWater',
+  'Wine',
+  'Key',
+  'Lock',
+  'Gavel',
+  'Landmark',
+  'Tent',
+  'TreePine',
+  'Sun',
+  'Moon',
+  'Zap',
+  'Feather',
+  'Anchor',
+  'Ribbon',
+  'Crown',
+  'Sword',
+  'Shield',
+  'Rocket',
+  'Globe',
+  'Map',
+  'Compass',
 ]
 
 // Catálogo estático de iconos para categorías. react-hooks/static-components no
@@ -235,6 +291,36 @@ const CATEGORY_ICONS: Record<string, LucideIcons.LucideIcon> = {
   Palette: LucideIcons.Palette,
   Pill: LucideIcons.Pill,
   Stethoscope: LucideIcons.Stethoscope,
+  Paintbrush: LucideIcons.Paintbrush,
+  Hammer: LucideIcons.Hammer,
+  Bike: LucideIcons.Bike,
+  Train: LucideIcons.Train,
+  Ship: LucideIcons.Ship,
+  Store: LucideIcons.Store,
+  Salad: LucideIcons.Salad,
+  Cake: LucideIcons.Cake,
+  IceCream: LucideIcons.IceCream,
+  GlassWater: LucideIcons.GlassWater,
+  Wine: LucideIcons.Wine,
+  Key: LucideIcons.Key,
+  Lock: LucideIcons.Lock,
+  Gavel: LucideIcons.Gavel,
+  Landmark: LucideIcons.Landmark,
+  Tent: LucideIcons.Tent,
+  TreePine: LucideIcons.TreePine,
+  Sun: LucideIcons.Sun,
+  Moon: LucideIcons.Moon,
+  Zap: LucideIcons.Zap,
+  Feather: LucideIcons.Feather,
+  Anchor: LucideIcons.Anchor,
+  Ribbon: LucideIcons.Ribbon,
+  Crown: LucideIcons.Crown,
+  Sword: LucideIcons.Sword,
+  Shield: LucideIcons.Shield,
+  Rocket: LucideIcons.Rocket,
+  Globe: LucideIcons.Globe,
+  Map: LucideIcons.Map,
+  Compass: LucideIcons.Compass,
 }
 
 function CategoryIcon({ name, className }: { name?: string; className?: string }) {
@@ -343,10 +429,27 @@ export function AdminPanel() {
   const [ownerSearch, setOwnerSearch] = useState('')
   const [licSearch, setLicSearch] = useState('')
 
+  // Paginado de tablas (20 por página)
+  const [bizPage, setBizPage] = useState(1)
+  const [ownerPage, setOwnerPage] = useState(1)
+  const [licPage, setLicPage] = useState(1)
+  const [reviewPage, setReviewPage] = useState(1)
+  const [userPage, setUserPage] = useState(1)
+
   // Códigos de pago de los dueños (tab Licencias)
   const [paymentCodes, setPaymentCodes] = useState<PaymentCode[]>([])
   const [payCodeInput, setPayCodeInput] = useState('')
   const [applyingCode, setApplyingCode] = useState(false)
+  const [showCodeHistory, setShowCodeHistory] = useState(false)
+
+  // Usuarios administradores (tab Usuarios)
+  const [admins, setAdmins] = useState<AdminUser[]>([])
+  const [userSearch, setUserSearch] = useState('')
+  const [showAdminForm, setShowAdminForm] = useState(false)
+  const [adminForm, setAdminForm] = useState({ name: '', username: '', password: '' })
+  const [editAdmin, setEditAdmin] = useState<AdminUser | null>(null)
+  const [editAdminForm, setEditAdminForm] = useState({ name: '', username: '', password: '' })
+  const [savingAdmin, setSavingAdmin] = useState(false)
 
   useEffect(() => {
     // Esperar a que termine la carga de la sesión antes de decidir
@@ -359,7 +462,7 @@ export function AdminPanel() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [o, b, l, c, s, cfg, pl, pc, rv] = await Promise.all([
+      const [o, b, l, c, s, cfg, pl, pc, rv, ad] = await Promise.all([
         fetch('/api/admin/owners').then((r) => r.json()),
         fetch('/api/admin/businesses').then((r) => r.json()),
         fetch('/api/admin/licenses').then((r) => r.json()),
@@ -369,12 +472,14 @@ export function AdminPanel() {
         fetch('/api/admin/plans').then((r) => r.json()),
         fetch('/api/admin/payment-codes').then((r) => r.json()),
         fetch('/api/admin/reviews').then((r) => r.json()).catch(() => []),
+        fetch('/api/admin/users').then((r) => r.json()).catch(() => []),
       ])
       setOwners(o)
       setBusinesses(b)
       setLicenses(l)
       setCategories(c)
       if (!s?.error) setStats(s)
+      if (Array.isArray(ad)) setAdmins(ad)
       // /api/admin/settings devuelve un array de {key, value}
       if (Array.isArray(cfg)) {
         const map: Record<string, string> = {}
@@ -763,6 +868,99 @@ export function AdminPanel() {
     }
   }
 
+  // === Usuarios administradores ===
+  const filteredAdmins = useMemo(() => {
+    if (!userSearch) return admins
+    const q = userSearch.toLowerCase()
+    return admins.filter((a) => a.name.toLowerCase().includes(q) || a.username.toLowerCase().includes(q))
+  }, [admins, userSearch])
+
+  // Slices paginados (20 por página)
+  const bizPages = Math.max(1, Math.ceil(filteredBusinesses.length / TABLE_PAGE_SIZE))
+  const pagedBusinesses = filteredBusinesses.slice((Math.min(bizPage, bizPages) - 1) * TABLE_PAGE_SIZE, Math.min(bizPage, bizPages) * TABLE_PAGE_SIZE)
+  const ownerPages = Math.max(1, Math.ceil(filteredOwners.length / TABLE_PAGE_SIZE))
+  const pagedOwners = filteredOwners.slice((Math.min(ownerPage, ownerPages) - 1) * TABLE_PAGE_SIZE, Math.min(ownerPage, ownerPages) * TABLE_PAGE_SIZE)
+  const licPages = Math.max(1, Math.ceil(filteredLicenses.length / TABLE_PAGE_SIZE))
+  const pagedLicenses = filteredLicenses.slice((Math.min(licPage, licPages) - 1) * TABLE_PAGE_SIZE, Math.min(licPage, licPages) * TABLE_PAGE_SIZE)
+  const reviewPages = Math.max(1, Math.ceil(reviews.length / TABLE_PAGE_SIZE))
+  const pagedReviews = reviews.slice((Math.min(reviewPage, reviewPages) - 1) * TABLE_PAGE_SIZE, Math.min(reviewPage, reviewPages) * TABLE_PAGE_SIZE)
+  const userPages = Math.max(1, Math.ceil(filteredAdmins.length / TABLE_PAGE_SIZE))
+  const pagedAdmins = filteredAdmins.slice((Math.min(userPage, userPages) - 1) * TABLE_PAGE_SIZE, Math.min(userPage, userPages) * TABLE_PAGE_SIZE)
+
+  const createAdmin = async () => {
+    if (!adminForm.name || !adminForm.username || !adminForm.password) {
+      toast.error('Completa campos obligatorios')
+      return
+    }
+    setSavingAdmin(true)
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(adminForm),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success('Usuario admin creado')
+      setShowAdminForm(false)
+      setAdminForm({ name: '', username: '', password: '' })
+      await loadAll()
+    } catch (e: any) {
+      toast.error(e.message || 'Error')
+    } finally {
+      setSavingAdmin(false)
+    }
+  }
+
+  const openEditAdmin = (a: AdminUser) => {
+    setEditAdmin(a)
+    setEditAdminForm({ name: a.name, username: a.username, password: '' })
+  }
+
+  const saveEditAdmin = async () => {
+    if (!editAdmin) return
+    if (!editAdminForm.name.trim() || !editAdminForm.username.trim()) {
+      toast.error('Nombre y usuario son obligatorios')
+      return
+    }
+    setSavingAdmin(true)
+    try {
+      const body: Record<string, string> = {
+        id: editAdmin.id,
+        name: editAdminForm.name,
+        username: editAdminForm.username,
+      }
+      if (editAdminForm.password) body.password = editAdminForm.password
+      const res = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success('Usuario actualizado')
+      setEditAdmin(null)
+      await loadAll()
+    } catch (e: any) {
+      toast.error(e.message || 'Error')
+    } finally {
+      setSavingAdmin(false)
+    }
+  }
+
+  const deleteAdmin = async (id: string) => {
+    if (!confirm('¿Eliminar este usuario administrador?')) return
+    try {
+      const res = await fetch(`/api/admin/users?id=${id}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success('Usuario eliminado')
+      await loadAll()
+    } catch (e: any) {
+      toast.error(e.message || 'Error')
+    }
+  }
+
   const createBusiness = async () => {
     const finalSlug = bizForm.slug || slugify(bizForm.name)
     if (!bizForm.name || !finalSlug || !bizForm.ownerId || !bizForm.categoryId) {
@@ -964,6 +1162,11 @@ export function AdminPanel() {
             <Users className="h-4 w-4" />
             <span className="text-[9px] leading-none sm:hidden">Dueños</span>
             <span className="hidden text-xs sm:inline">Dueños</span>
+          </TabsTrigger>
+          <TabsTrigger value="users" className="flex-col gap-0.5 sm:flex-row sm:gap-1.5">
+            <ShieldCheck className="h-4 w-4" />
+            <span className="text-[9px] leading-none sm:hidden">Usuarios</span>
+            <span className="hidden text-xs sm:inline">Usuarios</span>
           </TabsTrigger>
           <TabsTrigger value="categories" className="flex-col gap-0.5 sm:flex-row sm:gap-1.5">
             <Tags className="h-4 w-4" />
@@ -1338,7 +1541,7 @@ export function AdminPanel() {
             <div className="flex items-center gap-2 flex-1 min-w-[220px] max-w-sm">
               <Input
                 value={bizSearch}
-                onChange={(e) => setBizSearch(e.target.value)}
+                onChange={(e) => { setBizSearch(e.target.value); setBizPage(1) }}
                 placeholder="Buscar negocio, dueño o categoría..."
               />
             </div>
@@ -1352,7 +1555,7 @@ export function AdminPanel() {
             </p>
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filteredBusinesses.map((b) => (
+            {pagedBusinesses.map((b) => (
               <Card
                 key={b.id}
                 className="flex cursor-pointer flex-col transition-all hover:border-primary/40 hover:shadow-md"
@@ -1410,6 +1613,7 @@ export function AdminPanel() {
               </Card>
             ))}
           </div>
+          <TablePager total={filteredBusinesses.length} page={bizPage} onPage={setBizPage} />
         </TabsContent>
 
         {/* DUEÑOS */}
@@ -1419,7 +1623,7 @@ export function AdminPanel() {
             <div className="flex items-center gap-2 flex-1 min-w-[220px] max-w-sm">
               <Input
                 value={ownerSearch}
-                onChange={(e) => setOwnerSearch(e.target.value)}
+                onChange={(e) => { setOwnerSearch(e.target.value); setOwnerPage(1) }}
                 placeholder="Buscar dueño por nombre, usuario o teléfono..."
               />
             </div>
@@ -1433,7 +1637,7 @@ export function AdminPanel() {
             </p>
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filteredOwners.map((o) => (
+            {pagedOwners.map((o) => (
               <Card key={o.id}>
                 <CardContent className="p-4 space-y-2">
                   <div className="flex items-start justify-between">
@@ -1471,6 +1675,22 @@ export function AdminPanel() {
                     <div>📅 {new Date(o.createdAt).toLocaleDateString('es-ES')}</div>
                   </div>
                   <div className="flex gap-2 flex-wrap">
+                    {o.phone && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 border-green-600 text-green-700 hover:bg-green-50"
+                        onClick={() => {
+                          const digits = o.phone!.replace(/[^0-9]/g, '')
+                          window.open(
+                            `https://wa.me/${digits}?text=${encodeURIComponent(`Hola ${o.name}, soy el equipo de AgendaT.`)}`,
+                            '_blank'
+                          )
+                        }}
+                      >
+                        <MessageSquare className="h-4 w-4 mr-1" />WhatsApp
+                      </Button>
+                    )}
                     {!o.emailVerified && (
                       <Button
                         size="sm"
@@ -1508,6 +1728,67 @@ export function AdminPanel() {
               </Card>
             ))}
           </div>
+          <TablePager total={filteredOwners.length} page={ownerPage} onPage={setOwnerPage} />
+        </TabsContent>
+
+        {/* USUARIOS ADMIN */}
+        <TabsContent value="users" className="space-y-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h2 className="text-xl font-semibold">{admins.length} administrador{admins.length === 1 ? '' : 'es'}</h2>
+            <div className="flex items-center gap-2 flex-1 min-w-[220px] max-w-sm">
+              <Input
+                value={userSearch}
+                onChange={(e) => { setUserSearch(e.target.value); setUserPage(1) }}
+                placeholder="Buscar usuario por nombre o usuario..."
+              />
+            </div>
+            <Button onClick={() => { setAdminForm({ name: '', username: '', password: '' }); setShowAdminForm(true) }}>
+              <Plus className="h-4 w-4 mr-1" />Nuevo usuario
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Cuentas con acceso al panel de administración. Pueden iniciar sesión en /admin con su usuario y contraseña.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {pagedAdmins.map((a) => {
+              const isMe = a.id === session.adminId
+              return (
+                <Card key={a.id}>
+                  <CardContent className="p-4 space-y-2">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h3 className="font-semibold flex items-center gap-1.5">
+                          {a.name}
+                          {isMe && <Badge variant="secondary" className="text-[10px]">Tú</Badge>}
+                        </h3>
+                        <p className="text-xs text-muted-foreground">@{a.username}</p>
+                      </div>
+                      <Lock className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div className="text-xs text-muted-foreground space-y-1">
+                      <div>📅 {new Date(a.createdAt).toLocaleDateString('es-ES')}</div>
+                    </div>
+                    <div className="flex gap-2 flex-wrap pt-1">
+                      <Button size="sm" variant="outline" className="flex-1" onClick={() => openEditAdmin(a)}>
+                        <Pencil className="h-4 w-4 mr-1" />Editar
+                      </Button>
+                      {!isMe && (
+                        <Button size="sm" variant="ghost" className="flex-1 text-destructive" onClick={() => deleteAdmin(a.id)}>
+                          <Trash2 className="h-4 w-4 mr-1" />Eliminar
+                        </Button>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
+            {pagedAdmins.length === 0 && (
+              <p className="text-sm text-muted-foreground col-span-full text-center py-6">
+                {userSearch ? 'Sin resultados para la búsqueda.' : 'No hay usuarios administradores.'}
+              </p>
+            )}
+          </div>
+          <TablePager total={filteredAdmins.length} page={userPage} onPage={setUserPage} />
         </TabsContent>
 
         {/* CATEGORÍAS */}
@@ -1639,13 +1920,22 @@ export function AdminPanel() {
           {/* Códigos de pago generados por los dueños (al elegir un plan) */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <KeyRound className="h-4 w-4 text-primary" />Códigos de pago
-              </CardTitle>
-              <CardDescription>
-                Los dueños generan un código de 6 dígitos al elegir un plan y lo envían por WhatsApp.
-                Introdlúcelo aquí para aplicar el pago y activar la licencia.
-              </CardDescription>
+              <div className="flex items-start justify-between gap-2 flex-wrap">
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <KeyRound className="h-4 w-4 text-primary" />Códigos de pago
+                  </CardTitle>
+                  <CardDescription>
+                    Los dueños generan un código de 6 dígitos al elegir un plan y lo envían por WhatsApp.
+                    Introdlúcelo aquí para aplicar el pago y activar la licencia.
+                  </CardDescription>
+                </div>
+                {paymentCodes.some((pc) => pc.status !== 'pendiente') && (
+                  <Button size="sm" variant="outline" onClick={() => setShowCodeHistory(!showCodeHistory)}>
+                    {showCodeHistory ? 'Ocultar histórico' : 'Histórico'}
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex items-center gap-2 flex-wrap">
@@ -1664,64 +1954,74 @@ export function AdminPanel() {
                   {applyingCode ? 'Aplicando...' : 'Aplicar pago'}
                 </Button>
               </div>
-              {paymentCodes.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Aún no hay códigos generados.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="border-b bg-muted/30">
-                      <tr>
-                        <th className="text-left p-2 font-medium">Código</th>
-                        <th className="text-left p-2 font-medium">Negocio</th>
-                        <th className="text-left p-2 font-medium">Plan</th>
-                        <th className="text-right p-2 font-medium">Precio</th>
-                        <th className="text-center p-2 font-medium">Estado</th>
-                        <th className="text-center p-2 font-medium">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {paymentCodes.map((pc) => (
-                        <tr key={pc.id} className="border-b">
-                          <td className="p-2 font-mono font-bold tracking-widest">{pc.code}</td>
-                          <td className="p-2">
-                            <div>{pc.business.name}</div>
-                            <div className="text-xs text-muted-foreground">/{pc.business.slug}</div>
-                          </td>
-                          <td className="p-2">
-                            {pc.kind === 'certificacion' ? (
-                              <Badge className="bg-blue-600">Certificación</Badge>
-                            ) : (
-                              <>{pc.planName} · {pc.durationDays}d</>
-                            )}
-                          </td>
-                          <td className="p-2 text-right">${pc.price.toLocaleString('es-ES')}</td>
-                          <td className="p-2 text-center">
-                            {pc.status === 'pendiente' ? (
-                              <Badge variant="secondary">Pendiente</Badge>
-                            ) : pc.status === 'pagada' ? (
-                              <Badge className="bg-green-600">Pagada</Badge>
-                            ) : (
-                              <Badge variant="destructive">Rechazada</Badge>
-                            )}
-                          </td>
-                          <td className="p-2 text-center">
-                            {pc.status === 'pendiente' && (
-                              <div className="flex items-center justify-center gap-1">
-                                <Button size="sm" onClick={() => applyPaymentCode(pc.code)}>
-                                  Aplicar
-                                </Button>
-                                <Button size="sm" variant="ghost" onClick={() => rejectPaymentCode(pc.id)}>
-                                  Rechazar
-                                </Button>
-                              </div>
-                            )}
-                          </td>
+              {(() => {
+                const visibleCodes = showCodeHistory
+                  ? paymentCodes
+                  : paymentCodes.filter((pc) => pc.status === 'pendiente')
+                if (visibleCodes.length === 0) {
+                  return (
+                    <p className="text-sm text-muted-foreground">
+                      {showCodeHistory ? 'Aún no hay códigos generados.' : 'No hay códigos pendientes.'}
+                    </p>
+                  )
+                }
+                return (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="border-b bg-muted/30">
+                        <tr>
+                          <th className="text-left p-2 font-medium">Código</th>
+                          <th className="text-left p-2 font-medium">Negocio</th>
+                          <th className="text-left p-2 font-medium">Plan</th>
+                          <th className="text-right p-2 font-medium">Precio</th>
+                          <th className="text-center p-2 font-medium">Estado</th>
+                          <th className="text-center p-2 font-medium">Acciones</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                      </thead>
+                      <tbody>
+                        {visibleCodes.map((pc) => (
+                          <tr key={pc.id} className="border-b">
+                            <td className="p-2 font-mono font-bold tracking-widest">{pc.code}</td>
+                            <td className="p-2">
+                              <div>{pc.business.name}</div>
+                              <div className="text-xs text-muted-foreground">/{pc.business.slug}</div>
+                            </td>
+                            <td className="p-2">
+                              {pc.kind === 'certificacion' ? (
+                                <Badge className="bg-blue-600">Certificación</Badge>
+                              ) : (
+                                <>{pc.planName} · {pc.durationDays}d</>
+                              )}
+                            </td>
+                            <td className="p-2 text-right">${pc.price.toLocaleString('es-ES')}</td>
+                            <td className="p-2 text-center">
+                              {pc.status === 'pendiente' ? (
+                                <Badge variant="secondary">Pendiente</Badge>
+                              ) : pc.status === 'pagada' ? (
+                                <Badge className="bg-green-600">Pagada</Badge>
+                              ) : (
+                                <Badge variant="destructive">Rechazada</Badge>
+                              )}
+                            </td>
+                            <td className="p-2 text-center">
+                              {pc.status === 'pendiente' && (
+                                <div className="flex items-center justify-center gap-1">
+                                  <Button size="sm" onClick={() => applyPaymentCode(pc.code)}>
+                                    Aplicar
+                                  </Button>
+                                  <Button size="sm" variant="ghost" onClick={() => rejectPaymentCode(pc.id)}>
+                                    Rechazar
+                                  </Button>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              })()}
             </CardContent>
           </Card>
 
@@ -1730,7 +2030,7 @@ export function AdminPanel() {
             <div className="flex items-center gap-2 flex-1 min-w-[220px] max-w-sm">
               <Input
                 value={licSearch}
-                onChange={(e) => setLicSearch(e.target.value)}
+                onChange={(e) => { setLicSearch(e.target.value); setLicPage(1) }}
                 placeholder="Buscar licencia por negocio..."
               />
             </div>
@@ -1758,7 +2058,7 @@ export function AdminPanel() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredLicenses.map((l) => {
+                    {pagedLicenses.map((l) => {
                       const licExpired = new Date(l.endDate) < new Date()
                       const isExpiring = !licExpired && (new Date(l.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24) <= 7
                       return (
@@ -1822,6 +2122,7 @@ export function AdminPanel() {
               </div>
             </CardContent>
           </Card>
+          <TablePager total={filteredLicenses.length} page={licPage} onPage={setLicPage} />
         </TabsContent>
 
         {/* AJUSTES */}
@@ -2023,7 +2324,7 @@ export function AdminPanel() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {reviews.map((r) => (
+              {pagedReviews.map((r) => (
                 <Card key={r.id}>
                   <CardContent className="p-4 space-y-2">
                     <div className="flex items-start justify-between gap-2">
@@ -2064,6 +2365,7 @@ export function AdminPanel() {
               ))}
             </div>
           )}
+          <TablePager total={reviews.length} page={reviewPage} onPage={setReviewPage} />
         </TabsContent>
       </Tabs>
 
@@ -2197,6 +2499,93 @@ export function AdminPanel() {
             <Button variant="outline" onClick={() => setEditOwner(null)}>Cancelar</Button>
             <Button onClick={saveEditOwner} disabled={savingEditOwner}>
               {savingEditOwner ? 'Guardando...' : 'Guardar cambios'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: crear usuario admin */}
+      <Dialog open={showAdminForm} onOpenChange={setShowAdminForm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nuevo usuario administrador</DialogTitle>
+            <DialogDescription>
+              Esta cuenta podrá iniciar sesión en el panel de administración.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Nombre *</Label>
+              <Input
+                value={adminForm.name}
+                onChange={(e) => setAdminForm({ ...adminForm, name: e.target.value })}
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Usuario *</Label>
+              <Input
+                value={adminForm.username}
+                onChange={(e) => setAdminForm({ ...adminForm, username: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Contraseña * (mín. 4 caracteres)</Label>
+              <Input
+                type="password"
+                value={adminForm.password}
+                onChange={(e) => setAdminForm({ ...adminForm, password: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAdminForm(false)}>Cancelar</Button>
+            <Button onClick={createAdmin} disabled={savingAdmin}>
+              {savingAdmin ? 'Creando...' : 'Crear usuario'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: editar usuario admin */}
+      <Dialog open={!!editAdmin} onOpenChange={(o) => { if (!o) setEditAdmin(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar usuario administrador</DialogTitle>
+            <DialogDescription>
+              Actualiza los datos de la cuenta. Deja la contraseña vacía para no cambiarla.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Nombre</Label>
+              <Input
+                value={editAdminForm.name}
+                onChange={(e) => setEditAdminForm({ ...editAdminForm, name: e.target.value })}
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Usuario</Label>
+              <Input
+                value={editAdminForm.username}
+                onChange={(e) => setEditAdminForm({ ...editAdminForm, username: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Nueva contraseña (opcional, mín. 4 caracteres)</Label>
+              <Input
+                type="password"
+                value={editAdminForm.password}
+                onChange={(e) => setEditAdminForm({ ...editAdminForm, password: e.target.value })}
+                placeholder="Sin cambios"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditAdmin(null)}>Cancelar</Button>
+            <Button onClick={saveEditAdmin} disabled={savingAdmin}>
+              {savingAdmin ? 'Guardando...' : 'Guardar cambios'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2493,6 +2882,35 @@ export function AdminPanel() {
 // ============================================================
 // Subcomponentes
 // ============================================================
+
+const TABLE_PAGE_SIZE = 20
+
+function TablePager({
+  total,
+  page,
+  onPage,
+}: {
+  total: number
+  page: number
+  onPage: (p: number) => void
+}) {
+  const pages = Math.max(1, Math.ceil(total / TABLE_PAGE_SIZE))
+  if (pages <= 1) return null
+  const cur = Math.min(Math.max(1, page), pages)
+  return (
+    <div className="flex items-center justify-center gap-3 pt-2">
+      <Button size="sm" variant="outline" disabled={cur <= 1} onClick={() => onPage(cur - 1)}>
+        Anterior
+      </Button>
+      <span className="text-xs text-muted-foreground">
+        Página {cur} de {pages} · {total} total
+      </span>
+      <Button size="sm" variant="outline" disabled={cur >= pages} onClick={() => onPage(cur + 1)}>
+        Siguiente
+      </Button>
+    </div>
+  )
+}
 
 function PlanCard({
   plan,

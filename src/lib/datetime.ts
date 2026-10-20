@@ -26,6 +26,9 @@ export function generateSlots(
   dayEnd.setHours(eh, em, 0, 0)
 
   const slots: { start: Date; end: Date; available: boolean }[] = []
+  // Paso fijo de 15 min (o la duración si es menor), independiente de la
+  // duración del servicio, para permitir cualquier inicio que quepa en el día.
+  const stepMs = Math.min(15, durationMin) * 60 * 1000
   let cursor = new Date(dayStart)
   while (cursor < dayEnd) {
     const slotEnd = new Date(cursor.getTime() + durationMin * 60 * 1000)
@@ -36,7 +39,7 @@ export function generateSlots(
       (b) => cursor < b.end && slotEnd > b.start
     )
     slots.push({ start: new Date(cursor), end: slotEnd, available: !conflict })
-    cursor = new Date(slotEnd)
+    cursor = new Date(cursor.getTime() + stepMs)
   }
   return slots
 }

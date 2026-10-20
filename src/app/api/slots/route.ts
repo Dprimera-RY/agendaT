@@ -96,19 +96,25 @@ export async function GET(req: NextRequest) {
   const isToday = date.toDateString() === now.toDateString()
 
   const slots: { start: string; end: string; available: boolean }[] = []
+  // Paso de generación independiente de la duración del servicio: un servicio
+  // de 240 min con horario 9:00-18:00 debe poder empezar a las 14:00 y
+  // terminar exactamente a las 18:00 (cierre). Antes el paso era la propia
+  // duración y solo generaba 9:00 y 13:00.
+  const stepMs = Math.min(15, durationMin) * 60 * 1000
   let cursor = new Date(dayStart)
   while (cursor < dayEnd) {
     const slotEnd = new Date(cursor.getTime() + durationMin * 60 * 1000)
+    // Terminar exactamente al cierre (o antes) está permitido: <= dayEnd
     if (slotEnd > dayEnd) break
 
     if (isToday && cursor < now) {
-      cursor = new Date(slotEnd)
+      cursor = new Date(cursor.getTime() + stepMs)
       continue
     }
 
     // Excluir slots dentro del horario de no atención (almuerzo)
     if (breakStart && breakEnd && cursor < breakEnd && slotEnd > breakStart) {
-      cursor = new Date(slotEnd)
+      cursor = new Date(cursor.getTime() + stepMs)
       continue
     }
 
@@ -120,7 +126,7 @@ export async function GET(req: NextRequest) {
       end: `${String(slotEnd.getHours()).padStart(2, '0')}:${String(slotEnd.getMinutes()).padStart(2, '0')}`,
       available: !conflict,
     })
-    cursor = new Date(slotEnd)
+    cursor = new Date(cursor.getTime() + stepMs)
   }
 
   return NextResponse.json({ slots, availability: avail })

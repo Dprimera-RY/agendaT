@@ -33,8 +33,8 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       )
     }
-    if (province !== undefined && province !== null && province !== '' && !isValidProvince(province)) {
-      return NextResponse.json({ error: 'Provincia inválida' }, { status: 400 })
+    if (!province || !isValidProvince(province)) {
+      return NextResponse.json({ error: 'Debes seleccionar una provincia válida' }, { status: 400 })
     }
 
     // Si es owner, usar su propio ID; si es admin, requerir ownerId

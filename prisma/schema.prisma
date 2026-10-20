@@ -124,6 +124,7 @@ model Service {
   name        String
   description String?
   price       Float
+  currency    String   @default("CUP") // moneda del precio, editable por el dueño
   durationMin Int      @default(30) // duración en minutos
   color       String?  // color hex (#rrggbb) para el calendario del dueño
   active      Boolean  @default(true)

@@ -30,6 +30,7 @@ import {
 } from 'lucide-react'
 import { useRouterStore } from '@/lib/stores/router-store'
 import { useAuth } from '@/lib/stores/auth-store'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -102,6 +103,7 @@ interface Service {
   name: string
   description?: string
   price: number
+  currency?: string
   durationMin: number
   active: boolean
   color?: string | null
@@ -316,7 +318,14 @@ export function BusinessPanel({ slug }: { slug: string }) {
     }
   }, [business, session, slug, navigate])
 
-  // Cargar citas del mes actual (rango ampliado a semanas completas para la vista Semana)
+  // Las citas canceladas NO se pintan en el calendario (mes/semana/día):
+  // al cancelar, la cita desaparece de la vista. Siguen disponibles para
+  // estadísticas y el detalle si se seleccionan por otra vía.
+  const calendarAppts = useMemo(
+    () => appointments.filter((a) => a.status !== 'cancelada'),
+    [appointments]
+  )
+
   const loadAppointments = useCallback(async () => {
     if (!business) return
     const first = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)
@@ -758,7 +767,7 @@ export function BusinessPanel({ slug }: { slug: string }) {
           {viewMode === 'month' && (
             <MonthView
               date={currentDate}
-              appointments={appointments}
+              appointments={calendarAppts}
               services={services}
               onSlotClick={openAppt}
               onEmptySlot={openBookDialog}
@@ -772,7 +781,7 @@ export function BusinessPanel({ slug }: { slug: string }) {
           {viewMode === 'week' && (
             <WeekView
               date={currentDate}
-              appointments={appointments}
+              appointments={calendarAppts}
               services={services}
               onSlotClick={openAppt}
               onEmptySlot={openBookDialog}
@@ -787,7 +796,7 @@ export function BusinessPanel({ slug }: { slug: string }) {
           {viewMode === 'day' && (
             <DayView
               date={currentDate}
-              appointments={appointments}
+              appointments={calendarAppts}
               services={services}
               onSlotClick={openAppt}
               onEmptySlot={openBookDialog}
@@ -868,7 +877,7 @@ export function BusinessPanel({ slug }: { slug: string }) {
                     />
                     <span className="text-muted-foreground">Servicio:</span>
                     <strong>{selectedAppt.service?.name}</strong>
-                    <span className="ml-auto text-primary font-bold">${selectedAppt.service?.price}</span>
+                    <span className="ml-auto text-primary font-bold">${selectedAppt.service?.price} {selectedAppt.service?.currency || 'CUP'}</span>
                   </div>
                   <div className="col-span-2">
                     <span className="text-muted-foreground">Estado:</span>{' '}
@@ -1129,7 +1138,8 @@ export function BusinessPanel({ slug }: { slug: string }) {
                     min · $
                     {services
                       .filter((s) => bookForm.serviceIds.includes(s.id))
-                      .reduce((sum, s) => sum + s.price, 0)}
+                      .reduce((sum, s) => sum + s.price, 0)}{' '}
+                    {services.find((s) => bookForm.serviceIds.includes(s.id))?.currency || 'CUP'}
                   </span>
                 )}
               </div>
@@ -1148,7 +1158,7 @@ export function BusinessPanel({ slug }: { slug: string }) {
                     >
                       <span className="truncate">{s.name}</span>
                       <span className="shrink-0 text-xs text-muted-foreground">
-                        ${s.price} · {s.durationMin} min
+                        ${s.price} {s.currency || 'CUP'} · {s.durationMin} min
                       </span>
                     </button>
                   )
@@ -1440,21 +1450,31 @@ function WeekView({
     d.setDate(start.getDate() + i)
     return d
   })
-  // Rango horario dinámico: cubre disponibilidad del negocio y horas con citas,
-  // con piso 8 y techo 19 como valores por defecto.
+  const isMobile = useIsMobile()
+  // Rango horario dinámico: desde la disponibilidad del negocio y las horas
+  // que ocupan las citas (inicio y fin). Sin datos, 8:00-19:00.
   const hours = useMemo(() => {
-    let minH = 8
-    let maxH = 19
+    let minH = Number.POSITIVE_INFINITY
+    let maxH = Number.NEGATIVE_INFINITY
     for (const av of availabilities) {
-      const sh = parseInt(av.startTime.split(':')[0], 10)
-      const eh = parseInt(av.endTime.split(':')[0], 10)
+      const [sh, sm] = av.startTime.split(':').map(Number)
+      const [eh, em] = av.endTime.split(':').map(Number)
       if (!Number.isNaN(sh)) minH = Math.min(minH, sh)
-      if (!Number.isNaN(eh)) maxH = Math.max(maxH, eh)
+      // Última fila con sentido: si cierra a las 18:00 en punto, la última
+      // fila es 17:00; si cierra a las 18:30, también se muestra la 18:00.
+      if (!Number.isNaN(eh)) maxH = Math.max(maxH, em > 0 ? eh : eh - 1)
     }
     for (const a of appointments) {
-      const h = new Date(a.date).getHours()
-      minH = Math.min(minH, h)
-      maxH = Math.max(maxH, h)
+      const ad = new Date(a.date)
+      const end = new Date(ad.getTime() + (a.service?.durationMin || 30) * 60 * 1000)
+      minH = Math.min(minH, ad.getHours())
+      // Incluir la última hora que la cita ocupa
+      const endH = end.getMinutes() > 0 ? end.getHours() : end.getHours() - 1
+      maxH = Math.max(maxH, endH)
+    }
+    if (!Number.isFinite(minH) || !Number.isFinite(maxH)) {
+      minH = 8
+      maxH = 19
     }
     minH = Math.max(0, minH)
     maxH = Math.min(23, Math.max(maxH, minH + 5))
@@ -1463,10 +1483,18 @@ function WeekView({
   const [overKey, setOverKey] = useState<string | null>(null)
   const [conflictKey, setConflictKey] = useState<string | null>(null)
 
-  const apptsAt = (d: Date, h: number) => {
+  // Citas que INTERSECTAN la celda (hora d): incluye las que empezaron en una
+  // hora anterior y siguen (servicios largos). Sin esto, una cita de 240 min
+  // solo pintaba su hora de inicio y el resto parecía libre.
+  const apptsInHour = (d: Date, h: number) => {
+    const hourStart = new Date(d)
+    hourStart.setHours(h, 0, 0, 0)
+    const hourEnd = new Date(hourStart.getTime() + 60 * 60 * 1000)
     return appointments.filter((a) => {
       const ad = new Date(a.date)
-      return ad.toDateString() === d.toDateString() && ad.getHours() === h
+      if (ad.toDateString() !== d.toDateString()) return false
+      const ae = new Date(ad.getTime() + (a.service?.durationMin || 30) * 60 * 1000)
+      return ad < hourEnd && ae > hourStart
     })
   }
 
@@ -1482,6 +1510,67 @@ function WeekView({
     const probe = new Date(day)
     probe.setHours(h, appt ? new Date(appt.date).getMinutes() : 0, 0, 0)
     setConflictKey(hasConflict(dragId, probe) ? key : null)
+  }
+
+  // ===== MÓVIL: misma forma que la vista mensual (grilla de 7 columnas con
+  // chips por día), pero solo con los 7 días de la semana actual.
+  if (isMobile) {
+    const apptsForDay = (d: Date) =>
+      appointments.filter((a) => new Date(a.date).toDateString() === d.toDateString())
+    return (
+      <Card className="border-primary/20 shadow-sm">
+        <CardContent className="p-2">
+          <div className="grid grid-cols-7 gap-1">
+            {DAYS.map((d) => (
+              <div key={d} className="text-center text-xs font-medium text-muted-foreground py-1">
+                {d}
+              </div>
+            ))}
+            {weekDays.map((d, i) => {
+              const dayAppts = apptsForDay(d)
+              const isToday = d.toDateString() === today.toDateString()
+              return (
+                <div
+                  key={i}
+                  onClick={() => onEmptySlot(d)}
+                  className={`min-h-24 border rounded-md p-1 transition-colors ${
+                    isToday ? 'bg-primary/5 border-primary/30' : 'border-border'
+                  } ${dragId ? 'cursor-copy' : ''}`}
+                >
+                  <div className={`mb-1 text-xs ${isToday ? 'font-bold text-primary' : 'font-medium'}`}>
+                    {d.getDate()}
+                  </div>
+                  <div className="space-y-1">
+                    {dayAppts.slice(0, 3).map((a) => {
+                      const v = apptVisual(a, services)
+                      return (
+                        <button
+                          key={a.id}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onSlotClick(a)
+                          }}
+                          className="w-full text-left text-[11px] px-1.5 py-1 rounded truncate transition-colors hover:opacity-80"
+                          style={{ background: v.bg, color: v.fg, borderLeft: `3px solid ${v.border}` }}
+                          title={`${a.customerName} - ${a.service?.name}`}
+                        >
+                          <span className={v.lineThrough ? 'line-through' : ''}>
+                            {new Date(a.date).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })} {a.customerName.split(' ')[0]}
+                          </span>
+                        </button>
+                      )
+                    })}
+                    {dayAppts.length > 3 && (
+                      <div className="text-[10px] text-muted-foreground">+{dayAppts.length - 3} más</div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </CardContent>
+      </Card>
+    )
   }
 
   return (
@@ -1511,7 +1600,9 @@ function WeekView({
                 {h}:00
               </div>
               {weekDays.map((d, di) => {
-                const appts = apptsAt(d, h)
+                const appts = apptsInHour(d, h)
+                const startsHere = appts.filter((a) => new Date(a.date).getHours() === h)
+                const continuesHere = appts.filter((a) => new Date(a.date).getHours() !== h)
                 const hasAppt = appts.length > 0
                 const key = `${dayKey(d)}T${h}`
                 const isOver = dragId && overKey === key
@@ -1540,7 +1631,36 @@ function WeekView({
                   >
                     {hasAppt && (
                       <div className="space-y-0.5">
-                        {appts.slice(0, 3).map((appt) => {
+                        {continuesHere.map((appt) => {
+                          const v = apptVisual(appt, services)
+                          const end = new Date(
+                            new Date(appt.date).getTime() + (appt.service?.durationMin || 30) * 60000
+                          )
+                          return (
+                            <div
+                              key={appt.id + '-cont'}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                onSlotClick(appt)
+                              }}
+                              className="truncate rounded p-0.5 cursor-pointer opacity-75"
+                              style={{
+                                background: v.bg,
+                                color: v.fg,
+                                borderLeft: `3px dashed ${v.border}`,
+                              }}
+                              title={`${appt.customerName} — en curso hasta las ${end.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`}
+                            >
+                              <div className={`text-[10px] truncate font-medium ${v.lineThrough ? 'line-through' : ''}`}>
+                                ↳ {appt.customerName}
+                              </div>
+                              <div className="text-[9px] opacity-70 truncate">
+                                hasta {end.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                              </div>
+                            </div>
+                          )
+                        })}
+                        {startsHere.slice(0, 3).map((appt) => {
                           const v = apptVisual(appt, services)
                           return (
                             <div
@@ -1570,8 +1690,8 @@ function WeekView({
                             </div>
                           )
                         })}
-                        {appts.length > 3 && (
-                          <div className="text-[9px] text-muted-foreground text-center">+{appts.length - 3} más</div>
+                        {startsHere.length > 3 && (
+                          <div className="text-[9px] text-muted-foreground text-center">+{startsHere.length - 3} más</div>
                         )}
                       </div>
                     )}
@@ -1640,6 +1760,8 @@ function DayView({
             <div className="space-y-2">
               {dayAppts.map((a) => {
                 const v = apptVisual(a, services)
+                const startDate = new Date(a.date)
+                const endDate = new Date(startDate.getTime() + (a.service?.durationMin || 30) * 60000)
                 return (
                   <button
                     key={a.id}
@@ -1656,11 +1778,13 @@ function DayView({
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-3">
                         <div className="text-2xl font-bold" style={{ color: v.fg }}>
-                          {new Date(a.date).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                          {startDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
                         </div>
                         <div>
                           <div className={`font-medium ${v.lineThrough ? 'line-through' : ''}`}>{a.customerName}</div>
-                          <div className="text-sm opacity-80">{a.service?.name} · ${a.service?.price}</div>
+                          <div className="text-sm opacity-80">
+                            {a.service?.name} · {startDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}–{endDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })} · ${a.service?.price}
+                          </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -1693,9 +1817,9 @@ function ServicesTab({
   onChange: (s: Service[]) => void
 }) {
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ name: '', description: '', price: '', durationMin: '30', color: DEFAULT_SERVICE_COLORS[0] })
+  const [form, setForm] = useState({ name: '', description: '', price: '', currency: 'CUP', durationMin: '30', color: DEFAULT_SERVICE_COLORS[0] })
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [edit, setEdit] = useState({ name: '', description: '', price: '', durationMin: '30', color: DEFAULT_SERVICE_COLORS[0] })
+  const [edit, setEdit] = useState({ name: '', description: '', price: '', currency: 'CUP', durationMin: '30', color: DEFAULT_SERVICE_COLORS[0] })
 
   const create = async () => {
     if (!form.name || !form.price) {
@@ -1711,6 +1835,7 @@ function ServicesTab({
           name: form.name,
           description: form.description,
           price: Number(form.price),
+          currency: form.currency,
           durationMin: Number(form.durationMin),
           color: form.color,
         }),
@@ -1718,7 +1843,7 @@ function ServicesTab({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       onChange([...services, data])
-      setForm({ name: '', description: '', price: '', durationMin: '30', color: DEFAULT_SERVICE_COLORS[0] })
+      setForm({ name: '', description: '', price: '', currency: 'CUP', durationMin: '30', color: DEFAULT_SERVICE_COLORS[0] })
       setShowForm(false)
       toast.success('Servicio creado')
     } catch (e: any) {
@@ -1732,6 +1857,7 @@ function ServicesTab({
       name: s.name,
       description: s.description || '',
       price: String(s.price),
+      currency: s.currency || 'CUP',
       durationMin: String(s.durationMin),
       color: s.color || DEFAULT_SERVICE_COLORS[0],
     })
@@ -1751,6 +1877,7 @@ function ServicesTab({
           name: edit.name,
           description: edit.description,
           price: Number(edit.price),
+          currency: edit.currency,
           durationMin: Number(edit.durationMin),
           color: edit.color,
         }),
@@ -1804,7 +1931,7 @@ function ServicesTab({
       <CardContent className="space-y-3">
         {showForm && (
           <div className="border rounded-lg p-3 space-y-3 bg-muted/30">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <div className="space-y-1">
                 <Label className="text-xs">Nombre *</Label>
                 <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Corte de cabello" />
@@ -1812,6 +1939,10 @@ function ServicesTab({
               <div className="space-y-1">
                 <Label className="text-xs">Precio *</Label>
                 <Input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="25" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Moneda</Label>
+                <Input value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} placeholder="CUP" maxLength={8} />
               </div>
             </div>
             <div className="space-y-1">
@@ -1853,7 +1984,7 @@ function ServicesTab({
             {services.map((s) =>
               editingId === s.id ? (
                 <div key={s.id} className="border rounded-lg p-3 space-y-3 bg-muted/30">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <div className="space-y-1">
                       <Label className="text-xs">Nombre *</Label>
                       <Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
@@ -1861,6 +1992,10 @@ function ServicesTab({
                     <div className="space-y-1">
                       <Label className="text-xs">Precio *</Label>
                       <Input type="number" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Moneda</Label>
+                      <Input value={edit.currency} onChange={(e) => setEdit({ ...edit, currency: e.target.value })} placeholder="CUP" maxLength={8} />
                     </div>
                   </div>
                   <div className="space-y-1">
@@ -1912,7 +2047,7 @@ function ServicesTab({
                         <p className="text-xs text-muted-foreground">{s.description}</p>
                       )}
                       <div className="text-xs text-muted-foreground mt-1">
-                        {s.durationMin} min · ${s.price}
+                        {s.durationMin} min · ${s.price} {s.currency || 'CUP'}
                       </div>
                     </div>
                   </div>

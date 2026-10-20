@@ -48,6 +48,25 @@ export async function POST(req: NextRequest) {
     }
 
     const cleanEmail = email.trim().toLowerCase()
+
+    // Verificar unicidad de email y teléfono entre dueños
+    const [emailTaken, phoneTaken] = await Promise.all([
+      db.businessOwner.findFirst({ where: { email: cleanEmail } }),
+      phone ? db.businessOwner.findFirst({ where: { phone } }) : Promise.resolve(null),
+    ])
+    if (emailTaken) {
+      return NextResponse.json(
+        { error: 'Ya existe una cuenta con ese email' },
+        { status: 400 }
+      )
+    }
+    if (phoneTaken) {
+      return NextResponse.json(
+        { error: 'Ya existe una cuenta con ese número de móvil' },
+        { status: 400 }
+      )
+    }
+
     const owner = await db.businessOwner.create({
       data: {
         name,

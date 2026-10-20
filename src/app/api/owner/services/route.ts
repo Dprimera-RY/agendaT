@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
   }
   try {
-    const { businessId, name, description, price, durationMin, color } = await req.json()
+    const { businessId, name, description, price, currency, durationMin, color } = await req.json()
     if (!businessId || !name || price === undefined) {
       return NextResponse.json({ error: 'Faltan campos' }, { status: 400 })
     }
@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
         name,
         description,
         price: Number(price),
+        currency: (typeof currency === 'string' && currency.trim()) ? currency.trim().toUpperCase() : 'CUP',
         durationMin: Number(durationMin) || 30,
         color: color || null,
       },
@@ -60,7 +61,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
   }
   try {
-    const { id, name, description, price, durationMin, active, color } = await req.json()
+    const { id, name, description, price, currency, durationMin, active, color } = await req.json()
     if (!id) {
       return NextResponse.json({ error: 'id requerido' }, { status: 400 })
     }
@@ -83,6 +84,7 @@ export async function PATCH(req: NextRequest) {
         ...(name !== undefined && { name }),
         ...(description !== undefined && { description }),
         ...(price !== undefined && { price: Number(price) }),
+        ...(currency !== undefined && { currency: (typeof currency === 'string' && currency.trim()) ? currency.trim().toUpperCase() : 'CUP' }),
         ...(durationMin !== undefined && { durationMin: Number(durationMin) }),
         ...(active !== undefined && { active }),
         ...(color !== undefined && { color: color || null }),

@@ -88,20 +88,22 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       )
     }
-    const fitsAvailability = availabilities.some((a) => {
-      const [sh, sm] = a.startTime.split(':').map(Number)
-      const [eh, em] = a.endTime.split(':').map(Number)
-      const dayStart = new Date(appointmentStart)
-      dayStart.setHours(sh, sm, 0, 0)
-      const dayEnd = new Date(appointmentStart)
-      dayEnd.setHours(eh, em, 0, 0)
-      return appointmentStart >= dayStart && appointmentEnd <= dayEnd
-    })
-    if (!fitsAvailability) {
-      return NextResponse.json(
-        { error: 'El horario seleccionado excede el tiempo disponible del negocio' },
-        { status: 400 }
-      )
+    if (!byOwner) {
+      const fitsAvailability = availabilities.some((a) => {
+        const [sh, sm] = a.startTime.split(':').map(Number)
+        const [eh, em] = a.endTime.split(':').map(Number)
+        const dayStart = new Date(appointmentStart)
+        dayStart.setHours(sh, sm, 0, 0)
+        const dayEnd = new Date(appointmentStart)
+        dayEnd.setHours(eh, em, 0, 0)
+        return appointmentStart >= dayStart && appointmentEnd <= dayEnd
+      })
+      if (!fitsAvailability) {
+        return NextResponse.json(
+          { error: 'El horario seleccionado excede el tiempo disponible del negocio' },
+          { status: 400 }
+        )
+      }
     }
 
     // Horario de no atención (almuerzo) — solo aplica a reservas del público
@@ -203,6 +205,8 @@ export async function POST(req: NextRequest) {
         servicesList,
         date: appointmentStart,
         totalDurationMin,
+        depositRequired: !!business.depositEnabled && business.depositAmount > 0,
+        depositAmount: business.depositAmount,
       })
       const ownerLink = waLink(ownerPhone, whatsappMessage)
 

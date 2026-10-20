@@ -1,7 +1,7 @@
 'use client'
 
 import { type ReactNode, useEffect, useState } from 'react'
-import { CalendarCheck, Menu, LayoutDashboard, FileText, Download } from 'lucide-react'
+import { CalendarCheck, Menu, LayoutDashboard, FileText, Download, RefreshCw } from 'lucide-react'
 import { useRouterStore } from '@/lib/stores/router-store'
 import { useAuth } from '@/lib/stores/auth-store'
 import { Button } from '@/components/ui/button'
@@ -58,6 +58,28 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const isOnAdmin = route.path.startsWith('/admin')
   const isOnPanel = route.path.includes('/panel')
+  const [refreshing, setRefreshing] = useState(false)
+
+  // Limpiar caché del dispositivo y recargar todo desde el servidor
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    try {
+      if ('caches' in window) {
+        const keys = await caches.keys()
+        await Promise.all(keys.map((k) => caches.delete(k)))
+      }
+      // Limpiar localStorage menos la sesión y preferencias persistidas
+      const keep = ['agenda_session', 'agenda_province', 'agenda_catalog', 'agenda_hash']
+      const toRemove: string[] = []
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i)
+        if (k && !keep.includes(k)) toRemove.push(k)
+      }
+      toRemove.forEach((k) => localStorage.removeItem(k))
+    } catch {}
+    // Recarga dura que ignora la caché HTTP del navegador
+    window.location.reload()
+  }
 
   // Navegar cerrando el sidebar móvil
   const go = (path: string) => {
@@ -92,52 +114,41 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {session.role === 'owner' && (
         vertical ? (
-          // Sidebar móvil: acceso en un toque + negocios como enlaces directos
-          session.businesses && session.businesses.length > 0 ? (
-            <div className="flex flex-col gap-1.5 w-full">
+          // Sidebar móvil: panel + todos los negocios + crear
+          <div className="flex flex-col gap-1.5 w-full">
+            <span className="text-xs text-muted-foreground px-1 pt-1">Mis negocios</span>
+            {session.businesses && session.businesses.length > 0 ? (
+              session.businesses.map((b) => (
+                <Button
+                  key={b.id}
+                  variant={isOnPanel && route.path.includes(`/${b.slug}/`) ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => go(`/negocio/${b.slug}/panel`)}
+                  className="truncate"
+                >
+                  <LayoutDashboard className="h-4 w-4 mr-1 shrink-0" />
+                  {b.name}
+                </Button>
+              ))
+            ) : (
               <Button
-                variant="default"
+                variant={isOnPanel ? 'default' : 'ghost'}
                 size="sm"
-                onClick={() => go(`/negocio/${session.businesses![0].slug}/panel`)}
+                onClick={() => go('/crear-negocio')}
               >
                 <LayoutDashboard className="h-4 w-4 mr-1" />
                 Ir a mi panel
               </Button>
-              {session.businesses.length > 1 && (
-                <>
-                  <span className="text-xs text-muted-foreground px-1 pt-1">Mis negocios</span>
-                  {session.businesses.map((b) => (
-                    <Button
-                      key={b.id}
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => go(`/negocio/${b.slug}/panel`)}
-                      className="truncate"
-                    >
-                      {b.name}
-                    </Button>
-                  ))}
-                </>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-primary"
-                onClick={() => go('/crear-negocio')}
-              >
-                + Crear otro negocio
-              </Button>
-            </div>
-          ) : (
+            )}
             <Button
-              variant={isOnPanel ? 'default' : 'ghost'}
+              variant="ghost"
               size="sm"
+              className="text-primary"
               onClick={() => go('/crear-negocio')}
             >
-              <LayoutDashboard className="h-4 w-4 mr-1" />
-              Ir a mi panel
+              + Crear otro negocio
             </Button>
-          )
+          </div>
         ) : session.businesses && session.businesses.length > 0 ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -188,7 +199,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </Button>
       )}
 
-      {session.role ? (
+      {session.role && !vertical && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm">
@@ -198,13 +209,12 @@ export function AppShell({ children }: { children: ReactNode }) {
               {session.name}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align={vertical ? 'start' : 'end'} className="w-48">
+          <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuLabel>{session.username}</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="cursor-pointer text-destructive focus:text-destructive"
               onClick={() => {
-                setMenuOpen(false)
                 logout()
                 navigate('/')
               }}
@@ -213,7 +223,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      ) : (
+      )}
+      {!session.role && (
         <>
           <Button
             variant="ghost"
@@ -255,6 +266,17 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
 
           <div className="flex items-center gap-2">
+            {/* Botón refrescar: siempre visible, limpia caché y recarga */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              aria-label="Refrescar datos"
+              title="Limpiar caché y recargar"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            </Button>
             {/* Acciones inline solo en desktop */}
             <nav className="hidden items-center gap-2 sm:flex">{actions(false)}</nav>
             {/* Botón de menú: siempre visible en móvil, abre el sidebar */}
@@ -269,16 +291,46 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <Menu className="h-5 w-5" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="right" className="w-72 sm:max-w-sm">
+              <SheetContent side="right" className="w-72 sm:max-w-sm flex flex-col">
                 <SheetHeader className="border-b border-border pb-4">
-                  <SheetTitle className="flex items-center gap-2">
-                    <img src={"/logo.png"} width={"28"} height={"28"} alt="" />
-                    AgendaT
-                  </SheetTitle>
+                  {session.role ? (
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-bold">
+                        {session.name?.charAt(0)?.toUpperCase() || '?'}
+                      </div>
+                      <div className="min-w-0">
+                        <SheetTitle className="truncate text-base">{session.name}</SheetTitle>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {session.role === 'admin' ? 'Administrador' : 'Dueño'} · @{session.username}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <SheetTitle className="flex items-center gap-2">
+                      <img src={"/logo.png"} width={"28"} height={"28"} alt="" />
+                      AgendaT
+                    </SheetTitle>
+                  )}
                 </SheetHeader>
-                <div className="flex flex-col gap-2 overflow-y-auto px-4 [&_button]:w-full [&_button]:justify-start">
+                <div className="flex-1 flex flex-col gap-2 overflow-y-auto px-4 [&_button]:w-full [&_button]:justify-start">
                   {actions(true)}
                 </div>
+                {session.role && (
+                  <div className="border-t border-border px-4 py-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-start text-destructive hover:text-destructive"
+                      onClick={() => {
+                        setMenuOpen(false)
+                        logout()
+                        navigate('/')
+                      }}
+                    >
+                      Cerrar sesión
+                    </Button>
+                  </div>
+                )}
               </SheetContent>
             </Sheet>
           </div>

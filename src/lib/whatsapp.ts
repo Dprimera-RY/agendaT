@@ -21,7 +21,12 @@ export function msgNewAppointment(opts: {
   servicesList: string
   date: Date
   totalDurationMin: number
+  depositRequired?: boolean
+  depositAmount?: number | null
 }): string {
+  const depositLine = opts.depositRequired
+    ? `\nPara CONFIRMAR la cita, el cliente debe realizar el depósito${opts.depositAmount ? ` de $${opts.depositAmount}` : ''}.\nUna vez recibido el depósito, marca la cita como confirmada en tu panel.`
+    : ''
   return `🟢 *NUEVA CITA AGENDADA*
 
 📋 Negocio: ${opts.businessName}
@@ -29,10 +34,7 @@ export function msgNewAppointment(opts: {
 📞 Teléfono: ${opts.customerPhone}
 💅 Servicio: ${opts.servicesList}
 📅 Fecha: ${fmtApptDate(opts.date)}
-⏱️ Duración total: ${opts.totalDurationMin} min
-
-Para CONFIRMAR la cita, el cliente debe realizar el depósito.
-Una vez recibido el depósito, marca la cita como confirmada en tu panel.`
+⏱️ Duración total: ${opts.totalDurationMin} min${depositLine}`
 }
 
 export function msgConfirmed(opts: { businessName: string; customerName: string; serviceName: string; date: Date }): string {

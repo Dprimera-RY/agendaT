@@ -41,13 +41,14 @@ export async function GET(req: NextRequest) {
     orderBy: { createdAt: 'desc' },
   })
 
-  // Filtrar sólo los que tienen licencia activa
+  // Filtrar sólo los que tienen licencia activa Y al menos un servicio activo
   const now = new Date()
   const filtered = businesses
     .filter((b) => {
       if (!b.license) return false
       if (!b.license.active) return false
       if (b.license.endDate < now) return false
+      if (!b.services || b.services.length === 0) return false
       return true
     })
     .map(({ reviews, ...b }) => {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Search,
   Calendar as CalIcon,
@@ -55,7 +55,7 @@ interface Business {
   province?: string | null
   phone?: string | null
   category: { id: string; name: string; slug: string; icon: string }
-  services: { id: string; name: string; price: number }[]
+  services: { id: string; name: string; price: number; currency?: string }[]
   license?: { endDate: string; active: boolean } | null
   certified?: boolean
   rating?: number | null
@@ -101,6 +101,9 @@ export function CatalogView() {
 
   // Lista de negocios: null = aún sin cargar (deriva el estado de loading)
   const [businesses, setBusinesses] = useState<Business[] | null>(null)
+  // Lazy load: se muestran de a 20; el sentinel con IntersectionObserver carga más
+  const [visibleCount, setVisibleCount] = useState(20)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
   // Búsqueda y categoría viven en el store del catálogo: al entrar a un negocio
   // y volver, se restauran los filtros con los que se estaba navegando.
   const q = useCatalogStore((s) => s.q)
@@ -182,7 +185,10 @@ export function CatalogView() {
     fetch(`/api/businesses?${params}`)
       .then((r) => r.json())
       .then((data) => {
-        if (!cancelled) setBusinesses(data)
+        if (!cancelled) {
+          setBusinesses(data)
+          setVisibleCount(20)
+        }
       })
       .catch(() => {
         if (!cancelled) {
@@ -196,6 +202,22 @@ export function CatalogView() {
   }, [deferredQ, categoryId, province])
 
   const loading = businesses === null || deferredQ !== q
+
+  // Lazy load: cuando el sentinel entra en pantalla, se muestran 20 más
+  const visibleBusinesses = businesses ? businesses.slice(0, visibleCount) : null
+  const hasMore = !!businesses && visibleCount < businesses.length
+  useEffect(() => {
+    if (!hasMore) return
+    const el = sentinelRef.current
+    if (!el) return
+    const obs = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting) {
+        setVisibleCount((v) => v + 20)
+      }
+    })
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [hasMore, visibleCount])
 
   // Chips de categoría → filtran por categoryId en la API
   const activeCategory = useMemo(
@@ -409,7 +431,7 @@ export function CatalogView() {
                 loading ? 'opacity-60' : ''
               }`}
             >
-              {businesses.map((b) => (
+              {(visibleBusinesses ?? []).map((b) => (
                 <BusinessCard
                   key={b.id}
                   business={b}
@@ -417,6 +439,11 @@ export function CatalogView() {
                   onClick={() => navigate(`/negocio/${b.slug}`)}
                 />
               ))}
+            </div>
+          )}
+          {hasMore && (
+            <div ref={sentinelRef} className="flex justify-center py-4" aria-hidden>
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
           )}
         </section>
@@ -631,22 +658,22 @@ function BusinessCard({
   const matchedServices = query
     ? business.services.filter((s) => s.name.toLowerCase().includes(query))
     : []
-  const minPrice =
+  const minPriceSvc =
     business.services.length > 0
-      ? Math.min(...business.services.map((s) => s.price))
+      ? business.services.reduce((min, s) => (s.price < min.price ? s : min), business.services[0])
       : null
 
   return (
     <Card
       onClick={onClick}
-      className="group flex cursor-pointer flex-row overflow-hidden rounded-xl border-border/70 transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-lg sm:flex-col sm:rounded-2xl"
+      className="group flex cursor-pointer flex-col overflow-hidden rounded-xl border-border/70 transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-lg sm:rounded-2xl"
     >
-      <div className="relative h-28 w-28 shrink-0 overflow-hidden bg-muted sm:h-auto sm:w-full sm:aspect-[4/3]">
+      <div className="relative aspect-[16/10] w-full shrink-0 overflow-hidden bg-muted sm:aspect-[4/3]">
         {business.logo || business.photo1 ? (
           <img
             src={business.logo || business.photo1 || ''}
             alt={business.name}
-            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            className="h-full w-full object-cover object-center transition-transform duration-300 group-hover:scale-105"
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary/20 to-primary/5">
@@ -655,13 +682,13 @@ function BusinessCard({
             </span>
           </div>
         )}
-        <Badge className="absolute left-3 top-3 hidden bg-background/90 text-foreground backdrop-blur sm:block">
+        <Badge className="absolute left-3 top-3 bg-background/90 text-foreground backdrop-blur">
           {business.category.name}
         </Badge>
         {business.province && (
           <Badge
             variant="outline"
-            className="absolute right-3 top-3 hidden bg-background/90 text-foreground backdrop-blur sm:block"
+            className="absolute right-3 top-3 bg-background/90 text-foreground backdrop-blur"
           >
             <MapPin className="mr-1 h-3 w-3" />
             {business.province}
@@ -683,8 +710,8 @@ function BusinessCard({
             </span>
           )}
         </div>
-        {/* Badges en línea solo en móvil (en desktop van sobre la imagen) */}
-        <div className="flex items-center gap-1.5 sm:hidden">
+        {/* Badges en línea ocultos: ahora van sobre la imagen en ambos layouts */}
+        <div className="hidden items-center gap-1.5 flex-wrap">
           <Badge variant="secondary" className="text-[10px]">
             {business.category.name}
           </Badge>
@@ -721,10 +748,10 @@ function BusinessCard({
         )}
 
         <div className="mt-auto flex items-center justify-between pt-1 sm:pt-2">
-          {minPrice !== null ? (
-            <p className="text-sm text-muted-foreground">
+          {minPriceSvc ? (
+            <p className="text-xs text-muted-foreground">
               Desde{' '}
-              <span className="text-lg font-bold text-primary">${minPrice}</span>
+              <span className="text-sm font-semibold text-primary">${minPriceSvc.price} {minPriceSvc.currency || 'CUP'}</span>
             </p>
           ) : (
             <span />

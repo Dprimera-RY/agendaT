@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
 import { useAuth } from '@/lib/stores/auth-store'
 import { initRouter, matchRoute, useRouterStore } from '@/lib/stores/router-store'
 import { CatalogView } from '@/components/agenda/views/CatalogView'
@@ -16,6 +16,10 @@ import { ForgotPasswordView } from '@/components/agenda/views/ForgotPasswordView
 import { TermsView } from '@/components/agenda/views/TermsView'
 import { AppShell } from '@/components/agenda/AppShell'
 
+// En el servidor useLayoutEffect no hace nada (evita el warning de React);
+// en el cliente aplica el hash ANTES del primer paint para no parpadear el catálogo.
+const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect
+
 export default function HomePage() {
   const { route } = useRouterStore()
   const { fetchMe, loading } = useAuth()
@@ -23,10 +27,13 @@ export default function HomePage() {
   // si el JS falla o tarda, el usuario ve el contenido (no un spinner eterno).
   const [mounted, setMounted] = useState(false)
 
+  useIsomorphicLayoutEffect(() => {
+    initRouter()
+  }, [])
+
   useEffect(() => {
     // setTimeout: montaje diferido (evita setState síncrono en el effect)
     const t = setTimeout(() => setMounted(true), 0)
-    initRouter()
     fetchMe()
     return () => clearTimeout(t)
   }, [fetchMe])

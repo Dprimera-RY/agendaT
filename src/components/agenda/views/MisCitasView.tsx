@@ -26,7 +26,7 @@ interface MyAppointment {
   date: string
   status: string // pendiente | confirmada | cancelada | completada
   notes?: string | null
-  service: { name: string; price: number; durationMin: number }
+  service: { name: string; price: number; currency?: string; durationMin: number }
   business: { id: string; name: string; slug: string; address?: string | null; phone?: string | null }
 }
 
@@ -209,7 +209,7 @@ export function MisCitasView() {
                         )}
                       </div>
                       <p className="text-sm text-muted-foreground">
-                        {a.service.name} · {a.service.durationMin} min · ${a.service.price}
+                        {a.service.name} · {a.service.durationMin} min · ${a.service.price} {a.service.currency || 'CUP'}
                       </p>
                       <p className="text-sm font-medium">
                         {new Date(a.date).toLocaleString('es-ES', {

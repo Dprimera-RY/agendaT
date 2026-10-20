@@ -55,6 +55,7 @@ interface Business {
     name: string
     description?: string
     price: number
+    currency?: string
     durationMin: number
   }[]
   availabilities: { id: string; dayOfWeek: number; startTime: string; endTime: string }[]
@@ -104,6 +105,10 @@ export function BusinessView({ slug }: { slug: string }) {
   const [slots, setSlots] = useState<Slot[] | null>(null)
   const [loadingSlots, setLoadingSlots] = useState(false)
   const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null)
+  // Calendario mensual visible en la página (independiente del diálogo de reserva)
+  const [inlineMonth, setInlineMonth] = useState<Date>(new Date())
+  const [inlineDate, setInlineDate] = useState<Date | null>(null)
+  const [inlineSlots, setInlineSlots] = useState<Slot[] | null>(null)
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
   const [customerEmail, setCustomerEmail] = useState('')
@@ -187,6 +192,28 @@ export function BusinessView({ slug }: { slug: string }) {
     if (date < today) return false
     return availableDaysOfWeek.has(date.getDay())
   }
+
+  // Cargar slots del calendario inline (usa la duración del primer servicio o 30 min)
+  // inlineSlots = null significa "sin día seleccionado o cargando"; [] = sin horarios
+  useEffect(() => {
+    if (!business || !inlineDate) return
+    let cancelled = false
+    const y = inlineDate.getFullYear()
+    const m = String(inlineDate.getMonth() + 1).padStart(2, '0')
+    const d = String(inlineDate.getDate()).padStart(2, '0')
+    const duration = business.services[0]?.durationMin || 30
+    fetch(`/api/slots?businessId=${business.id}&date=${y}-${m}-${d}&durationMin=${duration}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled) setInlineSlots(data.slots || [])
+      })
+      .catch(() => {
+        if (!cancelled) setInlineSlots([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [business, inlineDate])
 
   // Cargar slots cuando cambia la fecha o la selección de servicios
   useEffect(() => {
@@ -326,9 +353,9 @@ export function BusinessView({ slug }: { slug: string }) {
 
   return (
     <div className="container mx-auto px-4 py-8 space-y-8">
-      <Button variant="ghost" size="sm" onClick={() => navigate('/')} className="-ml-2">
+      {/* <Button variant="ghost" size="sm" onClick={() => navigate('/')} className="-ml-2">
         <ArrowLeft className="h-4 w-4 mr-1" />Volver al catálogo
-      </Button>
+      </Button> */}
 
       {/* HERO del negocio */}
       <Card className="overflow-hidden border-0 shadow-lg">
@@ -463,6 +490,116 @@ export function BusinessView({ slug }: { slug: string }) {
         </section>
       )}
 
+      {/* CALENDARIO DE DISPONIBILIDAD (vista mensual) */}
+      {business.availabilities.length > 0 && (
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-2xl font-semibold">Disponibilidad</h2>
+            <p className="text-sm text-muted-foreground">
+              Los días en color tienen espacio para citas. Selecciona uno para ver los horarios.
+            </p>
+          </div>
+          <Card>
+            <CardContent className="p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setInlineMonth(new Date(inlineMonth.getFullYear(), inlineMonth.getMonth() - 1, 1))}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="font-medium">
+                  {MONTHS[inlineMonth.getMonth()]} {inlineMonth.getFullYear()}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setInlineMonth(new Date(inlineMonth.getFullYear(), inlineMonth.getMonth() + 1, 1))}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="grid grid-cols-7 gap-1 text-center text-xs">
+                {DAYS.map((d) => (
+                  <div key={d} className="text-muted-foreground font-medium py-1">{d}</div>
+                ))}
+                {Array.from({ length: new Date(inlineMonth.getFullYear(), inlineMonth.getMonth(), 1).getDay() }).map((_, i) => (
+                  <div key={`e${i}`} />
+                ))}
+                {Array.from({ length: new Date(inlineMonth.getFullYear(), inlineMonth.getMonth() + 1, 0).getDate() }).map((_, i) => {
+                  const date = new Date(inlineMonth.getFullYear(), inlineMonth.getMonth(), i + 1)
+                  const available = isDayAvailable(date)
+                  const isSel = inlineDate?.toDateString() === date.toDateString()
+                  const isToday = today.toDateString() === date.toDateString()
+                  return (
+                    <button
+                      key={i + 1}
+                      disabled={!available}
+                      onClick={() => {
+                        setInlineSlots(null)
+                        setInlineDate(date)
+                      }}
+                      className={`relative h-9 rounded-lg text-sm transition-colors ${
+                        isSel
+                          ? 'bg-primary text-primary-foreground font-semibold'
+                          : available
+                            ? 'bg-green-50 text-green-800 hover:bg-green-100 font-medium'
+                            : 'bg-muted/50 text-muted-foreground/40 cursor-not-allowed'
+                      } ${isToday && !isSel ? 'ring-1 ring-primary/50' : ''}`}
+                    >
+                      {i + 1}
+                    </button>
+                  )
+                })}
+              </div>
+              {/* Horarios del día seleccionado */}
+              {inlineDate && (
+                <div className="border-t pt-3 space-y-2">
+                  <p className="text-sm font-medium">
+                    Horarios para {inlineDate.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
+                  </p>
+                  {inlineSlots === null ? (
+                    <p className="text-sm text-muted-foreground">Cargando horarios...</p>
+                  ) : inlineSlots.some((s) => s.available) ? (
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                      {inlineSlots.filter((s) => s.available).map((s) => (
+                        <Button
+                          key={s.start}
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedDate(inlineDate)
+                            setSelectedSlot(s)
+                            setBookingOpen(true)
+                          }}
+                        >
+                          {s.start}
+                        </Button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No hay horarios disponibles este día.</p>
+                  )}
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="mt-1"
+                    onClick={() => {
+                      setSelectedDate(inlineDate)
+                      setBookingOpen(true)
+                    }}
+                  >
+                    <CalendarCheck className="h-4 w-4 mr-1" />
+                    Agendar en este día
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </section>
+      )}
+
       {/* CARTA DE SERVICIOS Y PRECIOS */}
       <section className="space-y-4">
         <div>
@@ -487,7 +624,7 @@ export function BusinessView({ slug }: { slug: string }) {
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-2xl font-bold text-primary">${s.price}</div>
+                  <div className="text-base font-semibold text-primary">${s.price} {s.currency || 'CUP'}</div>
                   <Button
                     size="sm"
                     variant="outline"
@@ -640,7 +777,9 @@ export function BusinessView({ slug }: { slug: string }) {
             </DialogTitle>
             <DialogDescription>
               {bookedSuccess
-                ? 'Se notificó al dueño por WhatsApp. Confirma cuando realices el depósito.'
+                ? business?.depositEnabled && business.depositAmount
+                  ? 'Se notificó al dueño por WhatsApp. Confirma cuando realices el depósito.'
+                  : 'Se notificó al dueño por WhatsApp. El dueño la confirmará en breve.'
                 : 'Selecciona servicio, fecha y hora disponible. Un solo clic para reservar.'}
             </DialogDescription>
           </DialogHeader>
@@ -766,7 +905,8 @@ export function BusinessView({ slug }: { slug: string }) {
                       Total: {totalDurationMin} min · $
                       {business.services
                         .filter((s) => selectedServices.includes(s.id))
-                        .reduce((sum, s) => sum + s.price, 0)}
+                        .reduce((sum, s) => sum + s.price, 0)}{' '}
+                      {business.services.find((s) => selectedServices.includes(s.id))?.currency || 'CUP'}
                     </span>
                   )}
                 </div>
@@ -789,7 +929,7 @@ export function BusinessView({ slug }: { slug: string }) {
                           <div className="font-medium text-sm">{s.name}</div>
                           <div className="flex items-center gap-2 mt-1">
                             <span className="text-xs text-muted-foreground">{s.durationMin} min</span>
-                            <span className="font-bold text-primary text-xs">${s.price}</span>
+                            <span className="font-bold text-primary text-xs">${s.price} {s.currency || 'CUP'}</span>
                           </div>
                         </div>
                         <CheckCircle2

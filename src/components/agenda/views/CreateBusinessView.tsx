@@ -68,8 +68,8 @@ export function CreateBusinessView() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.name || !form.slug || !form.categoryId) {
-      toast.error('Nombre, URL y categoría son obligatorios')
+    if (!form.name || !form.slug || !form.categoryId || !form.province) {
+      toast.error('Nombre, URL, categoría y provincia son obligatorios')
       return
     }
     setLoading(true)
@@ -190,13 +190,12 @@ export function CreateBusinessView() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>Provincia</Label>
+                <Label>Provincia <span className="text-destructive">*</span></Label>
                 <Select value={form.province || 'none'} onValueChange={(v) => setForm({ ...form, province: v === 'none' ? '' : v })}>
                   <SelectTrigger aria-label="Provincia">
                     <SelectValue placeholder="Selecciona una provincia" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">Sin provincia</SelectItem>
                     {CUBA_PROVINCES.map((p) => (
                       <SelectItem key={p} value={p}>{p}</SelectItem>
                     ))}
